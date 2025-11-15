@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include frappe_sepa_export *.css
+recursive-include frappe_sepa_export *.csv
+recursive-include frappe_sepa_export *.html
+recursive-include frappe_sepa_export *.ico
+recursive-include frappe_sepa_export *.js
+recursive-include frappe_sepa_export *.json
+recursive-include frappe_sepa_export *.md
+recursive-include frappe_sepa_export *.png
+recursive-include frappe_sepa_export *.svg
+recursive-include frappe_sepa_export *.txt
+recursive-include frappe_sepa_export *.py
+recursive-exclude frappe_sepa_export *.pyc
