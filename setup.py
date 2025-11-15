@@ -1,15 +1,18 @@
 from setuptools import setup, find_packages
-import re
-from pathlib import Path
+import os
 
 with open("requirements.txt") as f:
     install_requires = f.read().strip().split("\n")
 
 # get version from __version__ variable in frappe_sepa_export/__version__.py
-version_file = Path(__file__).parent / "frappe_sepa_export" / "__version__.py"
-version = re.search(
-    r'__version__\s*=\s*["\']([^"\']+)["\']', version_file.read_text()
-).group(1)
+version = "0.0.1"
+version_file = os.path.join(
+    os.path.dirname(__file__), "frappe_sepa_export", "__version__.py"
+)
+if os.path.exists(version_file):
+    with open(version_file) as f:
+        exec(f.read())
+        version = locals().get("__version__", version)
 
 setup(
     name="frappe_sepa_export",
