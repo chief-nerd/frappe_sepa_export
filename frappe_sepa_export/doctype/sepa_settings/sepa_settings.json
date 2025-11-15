@@ -1,0 +1,105 @@
+{
+    "actions": [],
+    "allow_rename": 1,
+    "autoname": "field:company",
+    "creation": "2023-06-27 14:10:00.000000",
+    "doctype": "DocType",
+    "editable_grid": 1,
+    "engine": "InnoDB",
+    "field_order": [
+        "company_section",
+        "company",
+        "default_bank_account",
+        "column_break_3",
+        "default_debtor_name",
+        "default_country_code",
+        "sepa_format_section",
+        "sepa_schema_version"
+    ],
+    "fields": [
+        {
+            "fieldname": "company_section",
+            "fieldtype": "Section Break",
+            "label": "Company Details"
+        },
+        {
+            "fieldname": "company",
+            "fieldtype": "Link",
+            "in_list_view": 1,
+            "label": "Company",
+            "options": "Company",
+            "reqd": 1,
+            "unique": 1
+        },
+        {
+            "fieldname": "default_bank_account",
+            "fieldtype": "Link",
+            "label": "Default Bank Account",
+            "options": "Bank Account",
+            "reqd": 1
+        },
+        {
+            "fieldname": "column_break_3",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "default_debtor_name",
+            "fieldtype": "Data",
+            "label": "Default Debtor Name",
+            "reqd": 1
+        },
+        {
+            "fieldname": "default_country_code",
+            "fieldtype": "Data",
+            "label": "Default Country Code",
+            "reqd": 1
+        },
+        {
+            "fieldname": "sepa_format_section",
+            "fieldtype": "Section Break",
+            "label": "SEPA Format Settings"
+        },
+        {
+            "default": "pain.001.001.03",
+            "fieldname": "sepa_schema_version",
+            "fieldtype": "Select",
+            "label": "SEPA Schema Version",
+            "options": "pain.001.001.03\npain.001.001.02",
+            "reqd": 1
+        }
+    ],
+    "index_web_pages_for_search": 1,
+    "links": [],
+    "modified": "2023-06-27 14:10:00.000000",
+    "modified_by": "Administrator",
+    "module": "SEPA File Export",
+    "name": "SEPA Settings",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Accounts Manager",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "track_changes": 1
+}
