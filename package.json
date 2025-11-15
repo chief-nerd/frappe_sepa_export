@@ -1,0 +1,27 @@
+{
+    "name": "frappe_sepa_export",
+    "version": "0.0.1",
+    "description": "Generate SEPA XML Payment Instruction files for Purchase Invoices",
+    "main": "frappe_sepa_export/public/js/frappe_sepa_export.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/chief-nerd/frappe_sepa_export.git"
+    },
+    "keywords": [
+        "frappe",
+        "erpnext",
+        "sepa",
+        "payment",
+        "xml"
+    ],
+    "author": "Mimirio",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/chief-nerd/frappe_sepa_export/issues"
+    },
+    "homepage": "https://github.com/chief-nerd/frappe_sepa_export#readme",
+    "dependencies": {}
+}
