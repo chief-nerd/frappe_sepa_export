@@ -1,0 +1,18 @@
+[project]
+name = "frappe_sepa_export"
+authors = [{ name = "Mimirio", email = "dev@mimirio.com" }]
+description = "Generate SEPA XML Payment Instruction files for Purchase Invoices"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = ["beautifulsoup4>=4.9.0"]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.dev-dependencies]
+
+[project.urls]
+Homepage = "https://github.com/chief-nerd/frappe_sepa_export"
+Repository = "https://github.com/chief-nerd/frappe_sepa_export.git"
