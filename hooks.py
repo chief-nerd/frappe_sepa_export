@@ -20,6 +20,9 @@ doc_events = {
 # include js, css files in header of desk.html
 app_include_js = "/assets/frappe_sepa_export/js/frappe_sepa_export.js"
 
+# include js in doctype views
+doctype_js = {"Purchase Invoice": "public/js/purchase_invoice.js"}
+
 # Custom DocTypes
 # --------------
 # fixtures = ["Custom Field", "Custom Script"]

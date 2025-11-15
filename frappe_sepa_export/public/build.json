@@ -1,5 +1,8 @@
 {
     "js/frappe_sepa_export.js": [
         "public/js/frappe_sepa_export.js"
+    ],
+    "js/purchase_invoice.js": [
+        "public/js/purchase_invoice.js"
     ]
 }
