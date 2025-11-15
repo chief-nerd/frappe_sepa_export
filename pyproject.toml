@@ -11,6 +11,9 @@ dependencies = ["beautifulsoup4>=4.9.0"]
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"
 
+[tool.flit.module]
+name = "frappe_sepa_export"
+
 [tool.bench.dev-dependencies]
 
 [project.urls]

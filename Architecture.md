@@ -31,17 +31,15 @@ This document outlines the modern Frappe app structure used in this project, bas
 ```
 frappe_sepa_export/
 ├── pyproject.toml              # Modern Python package configuration
-├── MANIFEST.in                 # Specifies which files to include in package
+├── MANIFEST.in                 # CRITICAL: Specifies which files to include in package
 ├── requirements.txt            # Python dependencies
 ├── package.json                # Node.js metadata (minimal for Frappe apps)
 ├── README.md                   # Documentation
-├── hooks.py                    # (Optional) Root hooks for compatibility
 └── frappe_sepa_export/         # Main app module
     ├── __init__.py             # Module initialization with __version__
     ├── __version__.py          # Version definition
-    ├── hooks.py                # Frappe hooks configuration (PRIMARY)
-    ├── public/                 # Static assets
-    │   ├── build.json          # Empty {} for no bundling
+    ├── hooks.py                # Frappe hooks configuration (ONLY here, not in root)
+    ├── public/                 # Static assets (included via MANIFEST.in)
     │   └── js/                 # JavaScript files
     │       ├── frappe_sepa_export.js
     │       └── purchase_invoice.js
@@ -51,6 +49,8 @@ frappe_sepa_export/
     ├── install/                # Installation scripts
     └── utils.py                # Utility functions
 ```
+
+**Note:** No `build.json` file is needed for simple apps. Omit it entirely.
 
 ## pyproject.toml Configuration
 
@@ -94,19 +94,21 @@ doctype_js = {
 }
 ```
 
-With an empty `build.json`:
-```json
-{}
-```
+**No `build.json` file needed!** Simply omit it entirely.
 
 **Benefits:**
 - No build process needed
 - Files served directly
 - Faster development
 - Simpler debugging
+- No esbuild errors
+
+**Requirements:**
+- JavaScript files must be included via `MANIFEST.in` (see Critical section above)
+- Use `recursive-include your_app_name *.js` in MANIFEST.in
 
 ### 2. Bundled Loading (For Complex Apps)
-If using ES6 imports, TypeScript, or complex bundling:
+If using ES6 imports, TypeScript, or complex bundling, create `public/build.json`:
 
 ```json
 {
@@ -118,6 +120,8 @@ If using ES6 imports, TypeScript, or complex bundling:
 ```
 
 This requires esbuild to process the files during `bench build`.
+
+**Note:** Most apps don't need bundling. Start without `build.json` and only add it if you have complex build requirements.
 
 ## Version Management
 
@@ -158,13 +162,15 @@ If migrating from `setup.py` based structure:
 
 ## Best Practices
 
-1. **Keep JavaScript simple** - Avoid complex bundling unless necessary
-2. **Use semantic versioning** - Follow MAJOR.MINOR.PATCH format
-3. **Minimize dependencies** - Only include what's truly needed
-4. **Empty build.json** - Unless you need asset bundling
-5. **Module hooks** - Place hooks.py in the module directory for pyproject.toml apps
-6. **Type hints** - Use Python type annotations for better IDE support
-7. **Documentation** - Keep README.md updated with installation and usage instructions
+1. **MANIFEST.in is CRITICAL** - Always include a complete `MANIFEST.in` file listing all asset types (JS, CSS, HTML, JSON, etc.). This is the #1 cause of "paths[0] undefined" errors.
+2. **No build.json needed** - For simple apps, omit `build.json` entirely (don't even create an empty one). JavaScript loads via `hooks.py`.
+3. **Module hooks only** - With `pyproject.toml`, place `hooks.py` ONLY in the module directory, not in root. Root hooks can cause conflicts.
+4. **Keep JavaScript simple** - Avoid complex bundling unless necessary. Direct loading is faster and simpler.
+5. **Use semantic versioning** - Follow MAJOR.MINOR.PATCH format
+6. **Minimize dependencies** - Only include what's truly needed
+7. **Test installation early** - After creating `MANIFEST.in`, test `pip install -e .` immediately to catch packaging issues
+8. **Type hints** - Use Python type annotations for better IDE support
+9. **Documentation** - Keep README.md updated with installation and usage instructions
 
 ## References
 
@@ -173,21 +179,79 @@ Successful Frappe apps following this structure:
 - [erpnext_pdf-on-submit](https://github.com/alyf-de/erpnext_pdf-on-submit) - Feature-rich app
 - [frappe/hrms](https://github.com/frappe/hrms) - Large-scale official app
 
+## Critical: MANIFEST.in Configuration
+
+**This is the most common cause of installation failures with pyproject.toml apps!**
+
+The `MANIFEST.in` file tells Python which files to include when packaging the app. Without it, the `public/` directory and JavaScript files won't be included in the installed package, causing Frappe's esbuild to fail with:
+
+```
+TypeError [ERR_INVALID_ARG_TYPE]: The "paths[0]" argument must be of type string. Received undefined
+```
+
+### Required MANIFEST.in
+
+```manifest
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include frappe_sepa_export *.css
+recursive-include frappe_sepa_export *.csv
+recursive-include frappe_sepa_export *.html
+recursive-include frappe_sepa_export *.ico
+recursive-include frappe_sepa_export *.js
+recursive-include frappe_sepa_export *.json
+recursive-include frappe_sepa_export *.md
+recursive-include frappe_sepa_export *.png
+recursive-include frappe_sepa_export *.svg
+recursive-include frappe_sepa_export *.txt
+recursive-include frappe_sepa_export *.py
+recursive-exclude frappe_sepa_export *.pyc
+```
+
+**Key points:**
+- Replace `frappe_sepa_export` with your app name
+- Include all file types used in your app (JS, CSS, HTML, JSON, etc.)
+- The `*.js` inclusion is critical for JavaScript files in `public/js/`
+- Without this, pip installs the Python code but not the static assets
+
 ## Troubleshooting
 
-### Build Errors with esbuild
-- **Solution:** Use empty `build.json` (`{}`) if you don't need bundling
-- JavaScript will still load via `hooks.py` configuration
+### TypeError: paths[0] must be of type string. Received undefined
+**Root Cause:** The `MANIFEST.in` file is missing or incomplete, so the `public/` directory isn't included in the pip-installed package.
+
+**Solution:**
+1. Create/update `MANIFEST.in` with all necessary file types (see above)
+2. Ensure `recursive-include your_app_name *.js` is present
+3. Reinstall the app: `pip install -e .` in development or `bench get-app` from scratch
+4. Verify installation: Check that `site-packages/your_app/public/js/` contains your files
+
+**Related Issues:**
+- [frappe/frappe#26346](https://github.com/frappe/frappe/issues/26346)
+- [frappe/frappe#28410](https://github.com/frappe/frappe/issues/28410)
+
+### Build Errors with esbuild (Other Causes)
+- **No build.json:** Remove `build.json` entirely (not even empty `{}`). Reference apps like `red_background` don't have this file at all.
+- **Root hooks.py conflict:** With `pyproject.toml`, only keep `hooks.py` in the module directory, not in the root
+- **JavaScript will still load:** Via `hooks.py` configuration, no build process needed for simple apps
 
 ### Version Not Found
 - **Solution:** Ensure `__version__` is defined in `__init__.py`
 - Check that `pyproject.toml` has `dynamic = ["version"]`
+- Both `__init__.py` and `__version__.py` should have the same version string
 
 ### Module Import Errors
 - **Solution:** Verify package name matches directory name
 - Check that `__init__.py` exists in the module directory
+- Ensure the app is pip-installed in the bench's virtual environment
+- Activate virtualenv before installing: `source env/bin/activate && pip install -e .`
 
 ### Assets Not Loading
 - **Solution:** Check paths in `hooks.py` match actual file locations
 - Verify files exist in `public/js/` directory
+- **Most importantly:** Check `MANIFEST.in` includes the necessary file types
 - Clear browser cache and run `bench clear-cache`
+- Reinstall app if `MANIFEST.in` was updated after initial installation
