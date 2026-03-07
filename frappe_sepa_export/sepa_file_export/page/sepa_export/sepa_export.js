@@ -23,16 +23,18 @@ class SEPAExportTool {
 			() => this.generate_xml(),
 			'download'
 		);
-		this.page.set_secondary_action(
-			__('Load Open Invoices'),
-			() => this.load_invoices()
-		);
 
 		this.wrapper = $('<div class="sepa-export-tool"></div>').appendTo(this.body);
 		this.make_controls();
 		this.table_area = $('<div class="sepa-table-area mt-4"></div>').appendTo(this.wrapper);
 		this.summary_area = $('<div class="sepa-summary mt-3"></div>').appendTo(this.wrapper);
-		this.render_empty_state();
+
+		// Auto-load invoices if a company default is set
+		if (this.field_group.get_value('company')) {
+			this.load_invoices();
+		} else {
+			this.render_empty_state();
+		}
 	}
 
 	make_controls() {
@@ -52,7 +54,11 @@ class SEPAExportTool {
 					change: () => {
 						this.invoices = [];
 						this.debtor_info = null;
-						this.render_empty_state();
+						if (this.field_group.get_value('company')) {
+							this.load_invoices();
+						} else {
+							this.render_empty_state();
+						}
 					}
 				},
 				{ fieldtype: 'Column Break' },
