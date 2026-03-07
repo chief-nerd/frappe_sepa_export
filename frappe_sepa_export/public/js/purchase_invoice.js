@@ -73,7 +73,7 @@ function create_dialog(frm, debtor_info) {
 				fieldname: 'payment_reference',
 				fieldtype: 'Data',
 				reqd: 1,
-				default: frm.doc.remarks || frm.doc.name,
+				default: frm.doc.name,
 				description: __('Verwendungszweck')
 			}
 		],
