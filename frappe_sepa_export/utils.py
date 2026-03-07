@@ -46,7 +46,9 @@ def get_debtor_info(company):
         sepa_settings = frappe.get_doc("SEPA Settings", company)
     except frappe.DoesNotExistError:
         frappe.throw(
-            _("No SEPA Settings found for company {0}. Please create one first.").format(company)
+            _(
+                "No SEPA Settings found for company {0}. Please create one first."
+            ).format(company)
         )
 
     result = {
@@ -59,7 +61,9 @@ def get_debtor_info(company):
 
     if sepa_settings.default_bank_account:
         try:
-            bank_account = frappe.get_doc("Bank Account", sepa_settings.default_bank_account)
+            bank_account = frappe.get_doc(
+                "Bank Account", sepa_settings.default_bank_account
+            )
             result["debtor_iban"] = bank_account.iban or ""
         except frappe.DoesNotExistError:
             frappe.throw(
