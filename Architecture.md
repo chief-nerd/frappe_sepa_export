@@ -281,65 +281,61 @@ Register a list-view JS file in `hooks.py`:
 doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 ```
 
+The path is relative to the app module directory. The file can live anywhere inside the module (e.g. `public/js/`, `custom/`, etc.).
+
 ### Chaining `onload` with Other Apps
 
-ERPNext (or other apps) may already define `frappe.listview_settings['Purchase Invoice']` with its own `onload`. If you overwrite it with `Object.assign`, the original is lost. Always save and chain the existing handler:
+ERPNext (or other apps) may already define `frappe.listview_settings['Purchase Invoice']` with its own `onload`. You must save and chain the existing handler. **Don't use `Object.assign` to rebuild the settings object** — this can cause subtle reference/timing bugs where the settings object gets replaced and Frappe's internal reference is lost.
+
+**Proven pattern** (from [alyf-de/banking](https://github.com/alyf-de/banking/blob/main/banking/custom/purchase_invoice_list.js)):
 
 ```javascript
-{
-    const existing_settings = frappe.listview_settings['Purchase Invoice'] || {};
-    const existing_onload = existing_settings.onload;
+// Save existing onload (may be set by ERPNext or another app)
+const _old_onload = frappe.listview_settings["Purchase Invoice"]?.onload;
 
-    frappe.listview_settings['Purchase Invoice'] = Object.assign(
-        existing_settings,
-        {
-            onload(listview) {
-                if (existing_onload) existing_onload.call(this, listview);
-                // … your custom code here …
-            }
-        }
-    );
-}
+// Directly replace .onload on the SAME object — don't create a new one
+frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
+    if (_old_onload) _old_onload.call(this, listview);
+
+    // … your custom code here …
+};
 ```
 
-The wrapping `{ }` block scope keeps the `existing_onload` reference private.
+**Key rules:**
+- Use optional chaining (`?.onload`) in case no prior settings exist
+- Directly mutate the `.onload` property on the existing settings object
+- Do NOT wrap in `Object.assign()` or create a new settings object
+- Do NOT wrap in a block scope `{ }` — keep the old_onload variable at module scope
 
-### Adding Items to the List-View "Actions" Dropdown (v15)
+### Adding Items to the List-View "Actions" Menu (v15)
 
-When the user checks items in a list view, Frappe v15 shows an **"Actions"** dropdown in the toolbar. This dropdown is **not** a regular page button group — it is built dynamically every time from `ListView.get_actions_menu_items()`.
+When the user checks items in a list view, Frappe v15 shows an **"Actions"** dropdown.
+
+**What works — `page.add_action_item()`:**
+
+Despite confusing naming, `listview.page.add_action_item()` is the correct API. This is the same approach used by the production [banking app](https://github.com/alyf-de/banking/blob/main/banking/custom/purchase_invoice_list.js):
+
+```javascript
+frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
+    if (_old_onload) _old_onload(listview);
+
+    listview.page.add_action_item(__('Export SEPA XML'), () => {
+        const selected = listview.get_checked_items()
+            .filter((item) => item.docstatus === 1);
+        if (!selected.length) return;
+        do_something(selected);
+    });
+};
+```
 
 **What does NOT work:**
 
 | Approach | Why it fails |
 |---|---|
-| `listview.page.add_action_item(label, fn)` | Adds to the page's kebab/three-dot **Menu**, not the selection "Actions" dropdown. The Menu is hidden when items are checked. |
-| `listview.page.add_inner_button(label, fn, __('Actions'))` | Creates a *new* "Actions" button group in the page header. This is a separate element from the built-in selection "Actions" dropdown. |
-
-**What works — monkey-patch `get_actions_menu_items()`:**
-
-```javascript
-onload(listview) {
-    const _orig = listview.get_actions_menu_items.bind(listview);
-    listview.get_actions_menu_items = function () {
-        const items = _orig();
-        items.push({
-            label: __('Export SEPA XML'),
-            action: () => {
-                const selected = listview.get_checked_items();
-                if (!selected.length) return;
-                do_something(selected);
-            },
-            standard: true
-        });
-        return items;
-    };
-}
-```
-
-Each item in the array is an object with:
-- `label` — display text
-- `action` — callback function
-- `standard` — set `true` to always show (not gated by permissions)
+| `Object.assign()` to rebuild settings | May create a new object that Frappe never reads; loses the reference |
+| Block-scoped `{ }` wrapper with `Object.assign` | Same reference issue, plus confusing load-order interactions |
+| `listview.page.add_inner_button(label, fn, __('Actions'))` | Creates a *separate* "Actions" button group in the page header — not the same dropdown |
+| Monkey-patching `get_actions_menu_items()` | Fragile; the method may not exist or may be called before the patch |
 
 ### Data Available from `listview.get_checked_items()`
 

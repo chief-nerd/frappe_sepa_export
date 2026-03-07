@@ -4,39 +4,24 @@
  * Adds a "Export SEPA XML" action to the list view so the user can
  * select multiple submitted & unpaid invoices, review / correct the
  * values in a table, and generate a single bundled SEPA XML file.
+ *
+ * Pattern based on alyf-de/banking – custom/purchase_invoice_list.js
  */
-{
-	const existing_settings = frappe.listview_settings['Purchase Invoice'] || {};
-	const existing_onload = existing_settings.onload;
+const _sepa_old_onload = frappe.listview_settings["Purchase Invoice"]?.onload;
 
-	frappe.listview_settings['Purchase Invoice'] = Object.assign(
-		existing_settings,
-		{
-			onload(listview) {
-				// Chain any existing onload (e.g. from ERPNext core)
-				if (existing_onload) existing_onload.call(this, listview);
+frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
+	if (_sepa_old_onload) _sepa_old_onload.call(this, listview);
 
-				// Inject into the "Actions" dropdown that appears when
-				// checkboxes are selected – this is built dynamically by
-				// ListView.get_actions_menu_items(), so we monkey-patch it.
-				const _orig_get_actions = listview.get_actions_menu_items.bind(listview);
-				listview.get_actions_menu_items = function () {
-					const items = _orig_get_actions();
-					items.push({
-						label: __('Export SEPA XML'),
-						action: () => {
-							const selected = listview.get_checked_items();
-							if (!selected.length) return;
-							start_bulk_sepa_export(selected);
-						},
-						standard: true
-					});
-					return items;
-				};
-			}
+	listview.page.add_action_item(__('Export SEPA XML'), () => {
+		const selected = listview.get_checked_items()
+			.filter((item) => item.docstatus === 1);
+		if (!selected.length) {
+			frappe.msgprint(__('Please select at least one submitted Purchase Invoice.'));
+			return;
 		}
-	);
-}
+		start_bulk_sepa_export(selected);
+	});
+};
 
 function start_bulk_sepa_export(selected_docs) {
 	const invoice_names = selected_docs.map(d => d.name);
