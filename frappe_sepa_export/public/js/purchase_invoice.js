@@ -1,8 +1,8 @@
 frappe.ui.form.on('Purchase Invoice', {
 	refresh: function (frm) {
-		console.log("SEPA Export JS Loaded");
-		// Show for Draft and Submitted invoices that are not paid
-		if (frm.doc.docstatus < 2 && frm.doc.status !== 'Paid') {
+		// Only show for Submitted invoices that are unpaid / partly paid / overdue
+		const allowed_statuses = ['Unpaid', 'Overdue', 'Partly Paid'];
+		if (frm.doc.docstatus === 1 && allowed_statuses.includes(frm.doc.status)) {
 			frm.add_custom_button(__('Export SEPA XML'), function () {
 				show_sepa_export_dialog(frm);
 			}, __('Create'));
@@ -107,23 +107,20 @@ function create_dialog_with_defaults(frm, defaults) {
 		],
 		primary_action_label: __('Generate SEPA XML'),
 		primary_action(values) {
-			// Call the server-side function to generate XML
-			frappe.call({
-				method: 'frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
-				args: {
+			d.hide();
+			// Use open_url_post to trigger a proper browser file download
+			open_url_post(
+				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+				{
 					invoice_names: values.invoices,
 					execution_date: values.execution_date,
 					debtor_name: values.debtor_name,
 					debtor_iban: values.debtor_iban,
-					debtor_bic: values.debtor_bic,
-					debtor_address: values.debtor_address.split('\n'),
+					debtor_bic: values.debtor_bic || '',
+					debtor_address: values.debtor_address,
 					debtor_country: values.debtor_country
-				},
-				callback: function (r) {
-					d.hide();
-					// The download will be handled by the server
 				}
-			});
+			);
 		}
 	});
 

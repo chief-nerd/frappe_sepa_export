@@ -5,15 +5,6 @@ app_description = "Generate SEPA XML Payment Instruction files for Purchase Invo
 app_email = "dev@mimirio.com"
 app_license = "MIT"
 
-# Document Events
-# ---------------
-# Hook on document methods and events
-doc_events = {
-    "Purchase Invoice": {
-        "on_submit": "frappe_sepa_export.utils.update_payment_status"
-    }
-}
-
 # Includes in <head>
 # ------------------
 

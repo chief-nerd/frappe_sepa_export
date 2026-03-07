@@ -1,6 +1,42 @@
 import frappe
+from frappe import _
 from xml.sax.saxutils import escape
 from datetime import datetime
+
+
+SEPA_NAMESPACES = {
+    "pain.001.001.03": "ISO:pain.001.001.03:APC:STUZZA:payments:003",
+    "pain.001.001.02": "ISO:pain.001.001.02:APC:STUZZA:payments:002",
+}
+
+
+def _get_supplier_address(supplier_name):
+    """Get address details for a supplier from the linked Address record.
+
+    Returns:
+        tuple: (country_code, address_lines list)
+    """
+    address_name = frappe.db.get_value(
+        "Dynamic Link",
+        {"link_doctype": "Supplier", "link_name": supplier_name, "parenttype": "Address"},
+        "parent",
+    )
+    if not address_name:
+        return "AT", []
+
+    address = frappe.get_doc("Address", address_name)
+    country_code = frappe.db.get_value("Country", address.country, "code") if address.country else "AT"
+    country_code = (country_code or "AT").upper()
+
+    lines = []
+    if address.address_line1:
+        lines.append(address.address_line1)
+    if address.address_line2:
+        lines.append(address.address_line2)
+    city_line = " ".join(filter(None, [address.pincode, address.city]))
+    if city_line:
+        lines.append(city_line)
+    return country_code, lines
 
 
 @frappe.whitelist()
@@ -49,6 +85,28 @@ def export_payment_instruction_xml(
         ],
     )
 
+    if not invoices:
+        frappe.throw(_("No invoices found for the given names."))
+
+    # Validate all invoices are in EUR
+    non_eur = [inv["name"] for inv in invoices if inv["currency"] != "EUR"]
+    if non_eur:
+        frappe.throw(
+            _("SEPA only supports EUR. The following invoices have a different currency: {0}").format(
+                ", ".join(non_eur)
+            )
+        )
+
+    # Determine SEPA schema namespace from settings (if available)
+    company = frappe.db.get_value("Purchase Invoice", invoices[0]["name"], "company")
+    schema_version = "pain.001.001.03"
+    try:
+        sepa_settings = frappe.get_doc("SEPA Settings", company)
+        schema_version = sepa_settings.sepa_schema_version or schema_version
+    except frappe.DoesNotExistError:
+        pass
+    namespace = SEPA_NAMESPACES.get(schema_version, SEPA_NAMESPACES["pain.001.001.03"])
+
     # Header values
     msg_id = datetime.now().strftime("%m%d%H%M") + frappe.generate_hash(length=16)
     pmt_inf_id = msg_id[:16]
@@ -56,10 +114,10 @@ def export_payment_instruction_xml(
     nb_of_txs = len(invoices)
     ctrl_sum = sum(float(inv["grand_total"]) for inv in invoices)
 
-    adr_lines = "".join(f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address)
+    adr_lines = "".join(f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address if line.strip())
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="ISO:pain.001.001.03:APC:STUZZA:payments:003" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <CstmrCdtTrfInitn>
 <GrpHdr>
 <MsgId>{msg_id}</MsgId>
@@ -104,34 +162,33 @@ def export_payment_instruction_xml(
     for idx, inv in enumerate(invoices, 1):
         # Fetch Supplier data
         supplier = frappe.get_doc("Supplier", inv["supplier"])
-        
+
         # Get bank account info from the Supplier's default bank account
         supplier_iban = "NOTPROVIDED"
-        supplier_country = "AT"  # Default country code
-        supplier_address = ""
-        
+
         if supplier.default_bank_account:
             try:
                 bank_account = frappe.get_doc("Bank Account", supplier.default_bank_account)
                 supplier_iban = bank_account.iban or "NOTPROVIDED"
-                # BIC is optional, leaving as NOTPROVIDED
-                
-                # Get supplier address
-                if hasattr(bank_account, "address_html") and bank_account.address_html:
-                    # Extract address from HTML if available
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(bank_account.address_html, 'html.parser')
-                    supplier_address = soup.get_text("\n").strip()
             except frappe.DoesNotExistError:
-                frappe.msgprint(f"Bank account {supplier.default_bank_account} not found for supplier {supplier.name}")
-        
-        # Get country from supplier if available
-        if hasattr(supplier, "country") and supplier.country:
-            supplier_country = supplier.country
-            
+                frappe.throw(
+                    _("Bank account {0} not found for supplier {1}").format(
+                        supplier.default_bank_account, supplier.name
+                    )
+                )
+        else:
+            frappe.throw(
+                _("Supplier {0} does not have a default bank account configured.").format(
+                    inv["supplier_name"] or inv["supplier"]
+                )
+            )
+
+        # Get country and address from the supplier's linked Address record
+        supplier_country, supplier_addr_lines = _get_supplier_address(inv["supplier"])
+
         address_lines = "".join(
             f"<AdrLine>{escape(line.strip())}</AdrLine>"
-            for line in supplier_address.split("\n")
+            for line in supplier_addr_lines
             if line.strip()
         )
         rmt_info = inv.get("remarks") or inv["name"]

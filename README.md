@@ -4,10 +4,10 @@ A custom Frappe application for ERPNext that enables exporting Purchase Invoices
 
 ## Features
 
-- Generate SEPA XML Payment Instruction files (pain.001.001.03) for single or multiple Purchase Invoices
-- Retrieve supplier banking information directly from the Supplier DocType
-- Configure company banking details and SEPA export settings
-- Support for batch payments
+- Generate SEPA XML Payment Instruction files (pain.001.001.03) for Purchase Invoices
+- Retrieve supplier banking information from the standard ERPNext Bank Account DocType
+- Configure company banking details and SEPA export settings via the SEPA Settings DocType
+- EUR currency validation
 
 ## Installation
 
@@ -25,17 +25,17 @@ bench install-app frappe_sepa_export
 
 ## Configuration
 
-1. After installation, navigate to SEPA Settings and create a new configuration for your company
-2. Add custom fields to your Supplier DocType for banking details (these will be added automatically during installation)
-3. Configure default banking information for your suppliers
+1. After installation, navigate to **SEPA Settings** and create a new configuration for your company
+2. Set up Bank Account records for your suppliers with valid IBANs
+3. Set each supplier's `default_bank_account` field to their Bank Account
 
 ## Usage
 
-1. Open a submitted Purchase Invoice
-2. Click on "Create" > "Export SEPA XML"
-3. Fill in the required information in the dialog
-4. Click "Generate SEPA XML" to download the file
-5. Import the downloaded XML file to your banking software to initiate the payment
+1. Open a submitted Purchase Invoice (status must be Unpaid, Overdue, or Partly Paid)
+2. Click **Create** > **Export SEPA XML**
+3. Fill in the debtor (your company) information in the dialog
+4. Click **Generate SEPA XML** to download the file
+5. Import the downloaded XML file into your banking software to initiate the payment
 
 ## Bank Account Configuration
 

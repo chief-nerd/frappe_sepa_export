@@ -2,20 +2,6 @@ import frappe
 from frappe import _
 
 
-def update_payment_status(doc, method):
-    """
-    Update payment status when Purchase Invoice is submitted
-
-    Args:
-        doc: Purchase Invoice document
-        method: Trigger method
-    """
-    # Example of a function that could be triggered on Invoice submission
-    # You might want to set a custom field on the Purchase Invoice
-    # to indicate it's ready for SEPA export
-    pass
-
-
 @frappe.whitelist()
 def validate_supplier_banking_details(supplier_name):
     """
