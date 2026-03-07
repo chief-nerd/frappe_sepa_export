@@ -23,6 +23,14 @@ bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_expor
 bench install-app frappe_sepa_export
 ```
 
+### Update
+
+```bash
+cd apps/frappe_sepa_export && git pull && cd ../..
+bench build --app frappe_sepa_export
+bench migrate
+```
+
 ## Configuration
 
 1. After installation, navigate to **SEPA Settings** and create a new configuration for your company
