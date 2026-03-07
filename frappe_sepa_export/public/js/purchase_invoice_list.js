@@ -16,14 +16,23 @@
 				// Chain any existing onload (e.g. from ERPNext core)
 				if (existing_onload) existing_onload.call(this, listview);
 
-				listview.page.add_action_item(__('Export SEPA XML'), () => {
-					const selected = listview.get_checked_items();
-					if (!selected.length) {
-						frappe.msgprint(__('Please select at least one Purchase Invoice.'));
-						return;
-					}
-					start_bulk_sepa_export(selected);
-				});
+				// Inject into the "Actions" dropdown that appears when
+				// checkboxes are selected – this is built dynamically by
+				// ListView.get_actions_menu_items(), so we monkey-patch it.
+				const _orig_get_actions = listview.get_actions_menu_items.bind(listview);
+				listview.get_actions_menu_items = function () {
+					const items = _orig_get_actions();
+					items.push({
+						label: __('Export SEPA XML'),
+						action: () => {
+							const selected = listview.get_checked_items();
+							if (!selected.length) return;
+							start_bulk_sepa_export(selected);
+						},
+						standard: true
+					});
+					return items;
+				};
 			}
 		}
 	);
