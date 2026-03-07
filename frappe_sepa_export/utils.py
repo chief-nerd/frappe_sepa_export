@@ -141,8 +141,7 @@ def get_bulk_invoice_details(invoice_names):
     if len(companies) > 1:
         frappe.throw(
             _(
-                "All selected invoices must belong to the same company. "
-                "Found: {0}"
+                "All selected invoices must belong to the same company. Found: {0}"
             ).format(", ".join(companies))
         )
 
