@@ -31,7 +31,7 @@ frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
 		}
 		start_bulk_sepa_export(selected);
 	});
-	});
+});
 };
 
 function start_bulk_sepa_export(selected_docs) {
