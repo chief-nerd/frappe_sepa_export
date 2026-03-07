@@ -18,14 +18,22 @@ def _get_supplier_address(supplier_name):
     """
     address_name = frappe.db.get_value(
         "Dynamic Link",
-        {"link_doctype": "Supplier", "link_name": supplier_name, "parenttype": "Address"},
+        {
+            "link_doctype": "Supplier",
+            "link_name": supplier_name,
+            "parenttype": "Address",
+        },
         "parent",
     )
     if not address_name:
         return "AT", []
 
     address = frappe.get_doc("Address", address_name)
-    country_code = frappe.db.get_value("Country", address.country, "code") if address.country else "AT"
+    country_code = (
+        frappe.db.get_value("Country", address.country, "code")
+        if address.country
+        else "AT"
+    )
     country_code = (country_code or "AT").upper()
 
     lines = []
@@ -92,9 +100,9 @@ def export_payment_instruction_xml(
     non_eur = [inv["name"] for inv in invoices if inv["currency"] != "EUR"]
     if non_eur:
         frappe.throw(
-            _("SEPA only supports EUR. The following invoices have a different currency: {0}").format(
-                ", ".join(non_eur)
-            )
+            _(
+                "SEPA only supports EUR. The following invoices have a different currency: {0}"
+            ).format(", ".join(non_eur))
         )
 
     # Determine SEPA schema namespace from settings (if available)
@@ -114,7 +122,9 @@ def export_payment_instruction_xml(
     nb_of_txs = len(invoices)
     ctrl_sum = sum(float(inv["grand_total"]) for inv in invoices)
 
-    adr_lines = "".join(f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address if line.strip())
+    adr_lines = "".join(
+        f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address if line.strip()
+    )
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -168,7 +178,9 @@ def export_payment_instruction_xml(
 
         if supplier.default_bank_account:
             try:
-                bank_account = frappe.get_doc("Bank Account", supplier.default_bank_account)
+                bank_account = frappe.get_doc(
+                    "Bank Account", supplier.default_bank_account
+                )
                 supplier_iban = bank_account.iban or "NOTPROVIDED"
             except frappe.DoesNotExistError:
                 frappe.throw(
@@ -178,9 +190,9 @@ def export_payment_instruction_xml(
                 )
         else:
             frappe.throw(
-                _("Supplier {0} does not have a default bank account configured.").format(
-                    inv["supplier_name"] or inv["supplier"]
-                )
+                _(
+                    "Supplier {0} does not have a default bank account configured."
+                ).format(inv["supplier_name"] or inv["supplier"])
             )
 
         # Get country and address from the supplier's linked Address record

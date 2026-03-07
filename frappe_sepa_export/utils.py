@@ -19,21 +19,21 @@ def validate_supplier_banking_details(supplier_name):
     if not supplier.default_bank_account:
         return {
             "valid": False,
-            "message": _("Supplier {0} doesn't have a default bank account configured").format(
-                supplier_name
-            ),
+            "message": _(
+                "Supplier {0} doesn't have a default bank account configured"
+            ).format(supplier_name),
         }
-    
+
     # Check if bank account has necessary details
     try:
         bank_account = frappe.get_doc("Bank Account", supplier.default_bank_account)
-        
+
         missing_fields = []
         if not bank_account.iban:
             missing_fields.append("IBAN")
-            
+
         # BIC/SWIFT is optional, not checking for bank_account_no
-            
+
         if missing_fields:
             return {
                 "valid": False,
@@ -41,7 +41,7 @@ def validate_supplier_banking_details(supplier_name):
                     supplier.default_bank_account, ", ".join(missing_fields)
                 ),
             }
-            
+
     except frappe.DoesNotExistError:
         return {
             "valid": False,
@@ -49,5 +49,5 @@ def validate_supplier_banking_details(supplier_name):
                 supplier.default_bank_account, supplier_name
             ),
         }
-        
+
     return {"valid": True}
