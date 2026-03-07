@@ -19,16 +19,13 @@ A custom Frappe application for ERPNext that enables exporting Purchase Invoices
 ### Install via Bench
 
 ```bash
-bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_export
-bench install-app frappe_sepa_export
+bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_export && bench install-app frappe_sepa_export
 ```
 
 ### Update
 
 ```bash
-cd apps/frappe_sepa_export && git pull && cd ../..
-bench build --app frappe_sepa_export
-bench migrate
+cd apps/frappe_sepa_export && git pull && cd ../.. && bench build --app frappe_sepa_export && bench migrate
 ```
 
 ## Configuration
