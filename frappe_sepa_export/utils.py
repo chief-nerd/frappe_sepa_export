@@ -79,6 +79,77 @@ def get_debtor_info(company):
 
 
 @frappe.whitelist()
+def get_bulk_invoice_details(invoice_names):
+    """Return full details for a list of Purchase Invoices so the
+    client-side review table can be populated.
+
+    Args:
+        invoice_names (str): JSON-encoded list of Purchase Invoice names
+
+    Returns:
+        list[dict]: invoice records with key fields
+    """
+    import json
+
+    if isinstance(invoice_names, str):
+        invoice_names = json.loads(invoice_names)
+
+    if not invoice_names:
+        return []
+
+    # Fetch WITHOUT docstatus filter so we can report ineligible ones explicitly
+    invoices = frappe.get_all(
+        "Purchase Invoice",
+        filters={"name": ["in", invoice_names]},
+        fields=[
+            "name",
+            "supplier",
+            "supplier_name",
+            "bill_no",
+            "grand_total",
+            "outstanding_amount",
+            "currency",
+            "status",
+            "company",
+            "posting_date",
+            "docstatus",
+        ],
+        order_by="posting_date asc",
+    )
+
+    # Report invoices that are not submitted
+    not_submitted = [inv["name"] for inv in invoices if inv["docstatus"] != 1]
+    if not_submitted:
+        frappe.throw(
+            _(
+                "The following invoices are not submitted and cannot be exported: {0}"
+            ).format(", ".join(not_submitted))
+        )
+
+    allowed_statuses = {"Unpaid", "Overdue", "Partly Paid"}
+    invalid = [inv["name"] for inv in invoices if inv["status"] not in allowed_statuses]
+    if invalid:
+        frappe.throw(
+            _(
+                "The following invoices are not eligible for SEPA export "
+                "(must be Unpaid / Overdue / Partly Paid): {0}"
+            ).format(", ".join(invalid))
+        )
+
+    # All invoices must belong to the same company
+    companies = set(inv["company"] for inv in invoices)
+    if len(companies) > 1:
+        frappe.throw(
+            _(
+                "All selected invoices must belong to the same company. "
+                "Found: {0}"
+            ).format(", ".join(companies))
+        )
+
+    return invoices
+
+
+@frappe.whitelist()
 def validate_supplier_banking_details(supplier_name):
     """
     Validate if supplier has necessary banking details for SEPA export

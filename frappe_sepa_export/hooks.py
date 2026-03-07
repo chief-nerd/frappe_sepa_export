@@ -11,6 +11,9 @@ app_license = "MIT"
 # include js in doctype views
 doctype_js = {"Purchase Invoice": "public/js/purchase_invoice.js"}
 
+# include js in list views
+doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
+
 # Custom DocTypes
 # --------------
 # fixtures = ["Custom Field", "Custom Script"]

@@ -57,6 +57,7 @@ def export_payment_instruction_xml(
     debtor_address,
     debtor_country,
     payment_reference=None,
+    payment_references=None,
 ):
     """
     Generate SEPA XML Payment Instruction file (pain.001.001.03) for purchase invoices
@@ -97,10 +98,23 @@ def export_payment_instruction_xml(
     if not invoices:
         frappe.throw(_("No invoices found for the given names."))
 
-    # Attach payment reference to invoices if provided
-    if payment_reference:
+    # Build per-invoice payment reference map
+    import json as _json
+
+    ref_map = {}
+    if payment_references:
+        if isinstance(payment_references, str):
+            ref_map = _json.loads(payment_references)
+        elif isinstance(payment_references, dict):
+            ref_map = payment_references
+
+    # Fall back to legacy single-reference parameter
+    if payment_reference and not ref_map:
         for inv in invoices:
-            inv["_payment_reference"] = payment_reference
+            ref_map[inv["name"]] = payment_reference
+
+    for inv in invoices:
+        inv["_payment_reference"] = ref_map.get(inv["name"])
 
     # Validate all invoices are in EUR
     non_eur = [inv["name"] for inv in invoices if inv["currency"] != "EUR"]

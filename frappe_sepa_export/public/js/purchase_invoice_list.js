@@ -1,0 +1,214 @@
+/**
+ * Purchase Invoice List View – Bulk SEPA Export
+ *
+ * Adds a "Export SEPA XML" action to the list view so the user can
+ * select multiple submitted & unpaid invoices, review / correct the
+ * values in a table, and generate a single bundled SEPA XML file.
+ */
+{
+	const existing_settings = frappe.listview_settings['Purchase Invoice'] || {};
+	const existing_onload = existing_settings.onload;
+
+	frappe.listview_settings['Purchase Invoice'] = Object.assign(
+		existing_settings,
+		{
+			onload(listview) {
+				// Chain any existing onload (e.g. from ERPNext core)
+				if (existing_onload) existing_onload.call(this, listview);
+
+				listview.page.add_action_item(__('Export SEPA XML'), () => {
+					const selected = listview.get_checked_items();
+					if (!selected.length) {
+						frappe.msgprint(__('Please select at least one Purchase Invoice.'));
+						return;
+					}
+					start_bulk_sepa_export(selected);
+				});
+			}
+		}
+	);
+}
+
+function start_bulk_sepa_export(selected_docs) {
+	const invoice_names = selected_docs.map(d => d.name);
+
+	frappe.call({
+		method: 'frappe_sepa_export.utils.get_bulk_invoice_details',
+		args: { invoice_names: JSON.stringify(invoice_names) },
+		freeze: true,
+		freeze_message: __('Fetching invoice details…'),
+		callback(r) {
+			if (!r.message || !r.message.length) return;
+			const invoices = r.message;
+
+			// Derive company from the validated invoices (backend guarantees same company)
+			const company = invoices[0].company;
+
+			frappe.call({
+				method: 'frappe_sepa_export.utils.get_debtor_info',
+				args: { company },
+				callback(r2) {
+					if (!r2.message) return;
+					show_bulk_review_dialog(invoices, r2.message);
+				}
+			});
+		}
+	});
+}
+
+function show_bulk_review_dialog(invoices, debtor_info) {
+	// Build HTML table with editable reference fields
+	const total = invoices.reduce((s, inv) => s + inv.grand_total, 0);
+
+	const d = new frappe.ui.Dialog({
+		title: __('Review & Export SEPA Payment Bundle'),
+		size: 'extra-large',
+		fields: [
+			{
+				fieldtype: 'HTML',
+				fieldname: 'invoice_table_area'
+			},
+			{
+				fieldtype: 'Section Break',
+				label: __('Summary')
+			},
+			{
+				label: __('Total Amount'),
+				fieldname: 'total_amount',
+				fieldtype: 'Currency',
+				default: total,
+				read_only: 1
+			},
+			{
+				fieldtype: 'Column Break'
+			},
+			{
+				label: __('Number of Invoices'),
+				fieldname: 'nb_invoices',
+				fieldtype: 'Int',
+				default: invoices.length,
+				read_only: 1
+			},
+			{
+				fieldtype: 'Section Break',
+				label: __('Execution')
+			},
+			{
+				label: __('Execution Date'),
+				fieldname: 'execution_date',
+				fieldtype: 'Date',
+				reqd: 1,
+				default: frappe.datetime.add_days(frappe.datetime.nowdate(), 1)
+			}
+		],
+		primary_action_label: __('Generate SEPA XML'),
+		primary_action(values) {
+			// Collect (possibly edited) values from the table
+			const rows = d.$wrapper.find('.sepa-review-table tbody tr');
+			const invoice_names = [];
+			const payment_references = {};
+			let has_error = false;
+
+			rows.each(function () {
+				const $row = $(this);
+				const name = $row.data('invoice');
+				const ref = $row.find('.sepa-ref-input').val().trim();
+				if (!ref) {
+					frappe.msgprint({
+						title: __('Missing Reference'),
+						message: __('Please provide a payment reference for {0}', [name]),
+						indicator: 'orange'
+					});
+					has_error = true;
+					return false; // break
+				}
+				invoice_names.push(name);
+				payment_references[name] = ref;
+			});
+
+			if (has_error) return;
+
+			d.hide();
+			open_url_post(
+				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+				{
+					invoice_names: invoice_names.join(','),
+					execution_date: values.execution_date,
+					debtor_name: debtor_info.debtor_name,
+					debtor_iban: debtor_info.debtor_iban,
+					debtor_bic: debtor_info.debtor_bic || '',
+					debtor_address: debtor_info.debtor_address,
+					debtor_country: debtor_info.debtor_country,
+					payment_references: JSON.stringify(payment_references)
+				}
+			);
+		}
+	});
+
+	// Render the editable table
+	const table_html = build_review_table(invoices);
+	d.fields_dict.invoice_table_area.$wrapper.html(table_html);
+	d.show();
+
+	// Recalculate total when amounts are not editable but keep this
+	// hook in case we make amounts editable later
+	d.$wrapper.on('change', '.sepa-ref-input', function () {
+		// nothing to recalculate, just a hook
+	});
+}
+
+function build_review_table(invoices) {
+	let rows = '';
+	for (const inv of invoices) {
+		const ref = inv.bill_no || inv.name;
+		const status_color = {
+			'Unpaid': 'orange',
+			'Overdue': 'red',
+			'Partly Paid': 'blue'
+		}[inv.status] || 'grey';
+
+		rows += `
+		<tr data-invoice="${frappe.utils.escape_html(inv.name)}">
+			<td style="vertical-align:middle;">
+				<a href="/app/purchase-invoice/${encodeURIComponent(inv.name)}" target="_blank">
+					${frappe.utils.escape_html(inv.name)}
+				</a>
+			</td>
+			<td style="vertical-align:middle;">${frappe.utils.escape_html(inv.supplier_name || inv.supplier)}</td>
+			<td style="vertical-align:middle;">${frappe.utils.escape_html(inv.bill_no || '–')}</td>
+			<td style="vertical-align:middle; text-align:right; font-variant-numeric:tabular-nums;">
+				${format_currency(inv.grand_total, inv.currency || 'EUR')}
+			</td>
+			<td style="vertical-align:middle;">
+				<span class="indicator-pill ${status_color}">${frappe.utils.escape_html(inv.status)}</span>
+			</td>
+			<td style="vertical-align:middle;">
+				<input
+					class="form-control form-control-sm sepa-ref-input"
+					type="text"
+					value="${frappe.utils.escape_html(ref)}"
+					style="min-width:160px;"
+				/>
+			</td>
+		</tr>`;
+	}
+
+	return `
+	<div style="max-height:400px; overflow:auto; border:1px solid var(--border-color); border-radius:var(--border-radius);">
+		<table class="table table-bordered sepa-review-table" style="margin-bottom:0;">
+			<thead style="position:sticky; top:0; background:var(--bg-color); z-index:1;">
+				<tr>
+					<th>${__('Invoice')}</th>
+					<th>${__('Supplier')}</th>
+					<th>${__('Supplier Inv. No.')}</th>
+					<th style="text-align:right;">${__('Amount')}</th>
+					<th>${__('Status')}</th>
+					<th>${__('Payment Reference')}</th>
+				</tr>
+			</thead>
+			<tbody>
+				${rows}
+			</tbody>
+		</table>
+	</div>`;
+}
