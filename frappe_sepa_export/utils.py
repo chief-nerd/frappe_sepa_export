@@ -197,3 +197,38 @@ def validate_supplier_banking_details(supplier_name):
         }
 
     return {"valid": True}
+
+
+@frappe.whitelist()
+def get_open_invoices(company):
+    """Return all submitted Purchase Invoices that are unpaid / overdue / partly paid
+    for the given company.
+
+    Args:
+        company (str): Company name
+
+    Returns:
+        list[dict]: invoice records
+    """
+    invoices = frappe.get_all(
+        "Purchase Invoice",
+        filters={
+            "company": company,
+            "docstatus": 1,
+            "status": ["in", ["Unpaid", "Overdue", "Partly Paid"]],
+        },
+        fields=[
+            "name",
+            "supplier",
+            "supplier_name",
+            "bill_no",
+            "grand_total",
+            "outstanding_amount",
+            "currency",
+            "status",
+            "company",
+            "posting_date",
+        ],
+        order_by="posting_date asc",
+    )
+    return invoices

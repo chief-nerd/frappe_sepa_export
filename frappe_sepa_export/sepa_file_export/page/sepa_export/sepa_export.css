@@ -1,0 +1,22 @@
+.sepa-export-tool .sepa-export-table th {
+	white-space: nowrap;
+	font-size: var(--text-sm);
+	border-bottom-width: 2px;
+}
+
+.sepa-export-tool .sepa-export-table td {
+	font-size: var(--text-sm);
+}
+
+.sepa-export-tool .sepa-ref-input {
+	font-size: var(--text-sm);
+}
+
+.sepa-export-tool .sepa-summary {
+	font-size: var(--text-base);
+}
+
+.sepa-export-tool .sepa-table-card {
+	overflow: hidden;
+	border-radius: var(--border-radius-lg);
+}

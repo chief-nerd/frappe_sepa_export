@@ -330,12 +330,12 @@ frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
 
 **What does NOT work:**
 
-| Approach | Why it fails |
-|---|---|
-| `Object.assign()` to rebuild settings | May create a new object that Frappe never reads; loses the reference |
-| Block-scoped `{ }` wrapper with `Object.assign` | Same reference issue, plus confusing load-order interactions |
+| Approach                                                   | Why it fails                                                                           |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `Object.assign()` to rebuild settings                      | May create a new object that Frappe never reads; loses the reference                   |
+| Block-scoped `{ }` wrapper with `Object.assign`            | Same reference issue, plus confusing load-order interactions                           |
 | `listview.page.add_inner_button(label, fn, __('Actions'))` | Creates a *separate* "Actions" button group in the page header — not the same dropdown |
-| Monkey-patching `get_actions_menu_items()` | Fragile; the method may not exist or may be called before the patch |
+| Monkey-patching `get_actions_menu_items()`                 | Fragile; the method may not exist or may be called before the patch                    |
 
 ### Data Available from `listview.get_checked_items()`
 
@@ -350,6 +350,87 @@ frappe.call({
     args: { names: JSON.stringify(names) }
 });
 ```
+
+### Reliability Warning
+
+`doctype_list_js` works well when only **one** app registers list JS for a given DocType.
+When **multiple apps** register `doctype_list_js` for the same DocType (e.g. both your app and alyf-de/banking register it for `Purchase Invoice`), load-order issues can cause your file to silently not execute. In that situation, a **dedicated Frappe Page** is far more reliable (see below).
+
+## Dedicated Frappe Pages (Recommended for Complex Workflows)
+
+When hooking into another DocType's list view is unreliable, create a standalone **Page** instead.
+Pages live at `/app/<page-name>`, load their own JS directly, and have zero conflicts with other apps.
+
+### File Structure
+
+```
+sepa_file_export/
+    page/
+        __init__.py
+        sepa_export/
+            __init__.py
+            sepa_export.json       # Page definition (synced to DB on bench migrate)
+            sepa_export.js         # Client-side logic
+            sepa_export.css        # Optional styles
+```
+
+Every directory **must** contain `__init__.py`. The page name in the JSON (`"name": "sepa-export"`) determines the URL: `/app/sepa-export`.
+
+### Page JSON
+
+```json
+{
+  "doctype": "Page",
+  "name": "sepa-export",
+  "module": "SEPA File Export",
+  "page_name": "sepa-export",
+  "title": "SEPA Export",
+  "standard": "Yes",
+  "roles": [
+    {"role": "System Manager"},
+    {"role": "Accounts User"},
+    {"role": "Accounts Manager"}
+  ]
+}
+```
+
+### Page JS Pattern
+
+```javascript
+frappe.pages['sepa-export'].on_page_load = function (wrapper) {
+    frappe.ui.make_app_page({
+        parent: wrapper,
+        title: __('SEPA Payment Export'),
+        single_column: true
+    });
+    wrapper.my_tool = new MyTool(wrapper);
+};
+
+class MyTool {
+    constructor(wrapper) {
+        this.page = wrapper.page;
+        this.body = $(this.page.body);
+        // page.set_primary_action(), page.set_secondary_action(),
+        // page.add_inner_button() all work reliably here
+    }
+}
+```
+
+Key advantages:
+- **No load-order conflicts** with other apps
+- Full control over layout, buttons, and behavior
+- `page.set_primary_action()` and `page.set_secondary_action()` always visible
+- Uses `frappe.ui.FieldGroup` for form controls (Company, Date pickers, etc.)
+- Custom HTML tables for editable review grids
+
+### Deployment
+
+After creating the page files:
+1. `bench migrate` (creates the Page record in the database)
+2. `bench build --app frappe_sepa_export` (bundles the JS/CSS)
+3. `bench restart` (picks up new routes)
+
+The page is then accessible at `/app/sepa-export`.
 
 ## Frappe Module System: How It Works
 
@@ -433,12 +514,12 @@ When you see "Module X not found", check in this order:
 
 There are several ways a Frappe app can end up in a Docker container:
 
-| Method | Has `.git`? | `bench get-app` works? | Update method |
-|---|---|---|---|
-| `bench get-app` inside container | ✅ Yes | ✅ Yes | `cd apps/app && git pull && cd ../.. && bench migrate` |
-| Baked into Docker image via pip | ❌ No | ❌ No (directory exists but no git) | Rebuild Docker image |
-| Volume-mounted from host | Depends | Depends | Edit on host, restart container |
-| Copied via Dockerfile `COPY` | ❌ No | ❌ No | Rebuild Docker image |
+| Method                           | Has `.git`? | `bench get-app` works?             | Update method                                          |
+| -------------------------------- | ----------- | ---------------------------------- | ------------------------------------------------------ |
+| `bench get-app` inside container | ✅ Yes       | ✅ Yes                              | `cd apps/app && git pull && cd ../.. && bench migrate` |
+| Baked into Docker image via pip  | ❌ No        | ❌ No (directory exists but no git) | Rebuild Docker image                                   |
+| Volume-mounted from host         | Depends     | Depends                            | Edit on host, restart container                        |
+| Copied via Dockerfile `COPY`     | ❌ No        | ❌ No                               | Rebuild Docker image                                   |
 
 ### Common Docker Pitfalls
 
