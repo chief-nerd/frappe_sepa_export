@@ -73,13 +73,17 @@ function create_dialog(frm, debtor_info) {
 				fieldname: 'payment_reference',
 				fieldtype: 'Data',
 				reqd: 1,
-				default: frm.doc.name,
-				description: __('Verwendungszweck')
+				default: frm.doc.bill_no || frm.doc.name,
+				description: __('Verwendungszweck – Supplier Invoice No.')
 			}
 		],
 		primary_action_label: __('Generate SEPA XML'),
 		primary_action(values) {
 			d.hide();
+			// Build per-invoice reference map
+			const payment_references = JSON.stringify({
+				[frm.doc.name]: values.payment_reference
+			});
 			open_url_post(
 				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
 				{
@@ -90,7 +94,7 @@ function create_dialog(frm, debtor_info) {
 					debtor_bic: debtor_info.debtor_bic || '',
 					debtor_address: debtor_info.debtor_address,
 					debtor_country: debtor_info.debtor_country,
-					payment_reference: values.payment_reference
+					payment_references: payment_references
 				}
 			);
 		}
