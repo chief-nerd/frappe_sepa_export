@@ -1,7 +1,8 @@
 frappe.ui.form.on('Purchase Invoice', {
 	refresh: function (frm) {
-		// Only show for submitted invoices that are not paid
-		if (frm.doc.docstatus === 1 && frm.doc.status !== 'Paid') {
+		console.log("SEPA Export JS Loaded");
+		// Show for Draft and Submitted invoices that are not paid
+		if (frm.doc.docstatus < 2 && frm.doc.status !== 'Paid') {
 			frm.add_custom_button(__('Export SEPA XML'), function () {
 				show_sepa_export_dialog(frm);
 			}, __('Create'));
@@ -108,7 +109,7 @@ function create_dialog_with_defaults(frm, defaults) {
 		primary_action(values) {
 			// Call the server-side function to generate XML
 			frappe.call({
-				method: 'frappe_sepa_export.frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+				method: 'frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
 				args: {
 					invoice_names: values.invoices,
 					execution_date: values.execution_date,

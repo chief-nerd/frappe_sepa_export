@@ -16,6 +16,7 @@ def update_payment_status(doc, method):
     pass
 
 
+@frappe.whitelist()
 def validate_supplier_banking_details(supplier_name):
     """
     Validate if supplier has necessary banking details for SEPA export

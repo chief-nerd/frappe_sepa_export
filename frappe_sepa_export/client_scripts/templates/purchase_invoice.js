@@ -5,7 +5,7 @@ frappe.ui.form.on('Purchase Invoice', {
 			frm.add_custom_button(__('Export SEPA XML'), function () {
 				// Check if supplier has banking details
 				frappe.call({
-					method: 'frappe_sepa_export.frappe_sepa_export.utils.validate_supplier_banking_details',
+					method: 'frappe_sepa_export.utils.validate_supplier_banking_details',
 					args: {
 						supplier_name: frm.doc.supplier
 					},

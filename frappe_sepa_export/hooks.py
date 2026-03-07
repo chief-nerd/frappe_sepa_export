@@ -10,7 +10,7 @@ app_license = "MIT"
 # Hook on document methods and events
 doc_events = {
     "Purchase Invoice": {
-        "on_submit": "frappe_sepa_export.frappe_sepa_export.utils.update_payment_status"
+        "on_submit": "frappe_sepa_export.utils.update_payment_status"
     }
 }
 
@@ -32,8 +32,8 @@ doctype_js = {"Purchase Invoice": "public/js/purchase_invoice.js"}
 
 # Installation
 # ------------
-# before_install = "frappe_sepa_export.frappe_sepa_export.install.setup.before_install"
-after_install = "frappe_sepa_export.frappe_sepa_export.install.setup.after_install"
+# before_install = "frappe_sepa_export.install.setup.before_install"
+after_install = "frappe_sepa_export.install.setup.after_install"
 
 # Desk Notifications
 # -----------------
