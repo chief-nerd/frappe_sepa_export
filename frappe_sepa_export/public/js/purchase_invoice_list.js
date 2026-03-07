@@ -7,10 +7,20 @@
  *
  * Pattern based on alyf-de/banking – custom/purchase_invoice_list.js
  */
-const _sepa_old_onload = frappe.listview_settings["Purchase Invoice"]?.onload;
+console.log("[SEPA Export] purchase_invoice_list.js loaded");
+
+// Ensure the settings object exists (ERPNext should have created it,
+// but guard against load-order edge cases)
+if (!frappe.listview_settings["Purchase Invoice"]) {
+	frappe.listview_settings["Purchase Invoice"] = {};
+}
+
+const _sepa_old_onload = frappe.listview_settings["Purchase Invoice"].onload;
 
 frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
 	if (_sepa_old_onload) _sepa_old_onload.call(this, listview);
+
+	console.log("[SEPA Export] onload fired, adding action item");
 
 	listview.page.add_action_item(__('Export SEPA XML'), () => {
 		const selected = listview.get_checked_items()
@@ -20,6 +30,7 @@ frappe.listview_settings["Purchase Invoice"].onload = function (listview) {
 			return;
 		}
 		start_bulk_sepa_export(selected);
+	});
 	});
 };
 
