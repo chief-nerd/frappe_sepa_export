@@ -58,25 +58,30 @@ def get_debtor_info(company):
         "debtor_city": "",
     }
 
-    if sepa_settings.default_bank_account:
+    # Resolve bank account: SEPA Settings > Company default
+    bank_account_name = sepa_settings.default_bank_account
+    if not bank_account_name:
+        bank_account_name = frappe.db.get_value(
+            "Company", company, "default_bank_account"
+        )
+
+    if bank_account_name:
         try:
-            bank_account = frappe.get_doc(
-                "Bank Account", sepa_settings.default_bank_account
-            )
+            bank_account = frappe.get_doc("Bank Account", bank_account_name)
             result["debtor_iban"] = bank_account.iban or ""
             result["debtor_bic"] = getattr(bank_account, "branch_code", "") or ""
         except frappe.DoesNotExistError:
             frappe.msgprint(
                 _(
-                    "Bank Account {0} configured in SEPA Settings was not found. Please update SEPA Settings."
-                ).format(sepa_settings.default_bank_account),
+                    "Bank Account {0} was not found. Please update SEPA Settings or the Company default bank account."
+                ).format(bank_account_name),
                 indicator="orange",
                 alert=True,
             )
     else:
         frappe.msgprint(
             _(
-                "No default bank account configured in SEPA Settings for {0}. Please set one."
+                "No bank account found for {0}. Please set one in SEPA Settings or in the Company record."
             ).format(company),
             indicator="orange",
             alert=True,
