@@ -148,6 +148,35 @@ def validate_sepa_export(invoice_names, company):
             continue
         checked_suppliers.add(inv["supplier"])
 
+        display_name = inv["supplier_name"] or inv["supplier"]
+
+        # Check supplier bank account & IBAN
+        supplier = frappe.get_doc("Supplier", inv["supplier"])
+        if not supplier.default_bank_account:
+            warnings.append(
+                _("Supplier {0} has no default bank account configured.").format(
+                    display_name
+                )
+            )
+        else:
+            try:
+                bank_account = frappe.get_doc(
+                    "Bank Account", supplier.default_bank_account
+                )
+                if not bank_account.iban:
+                    warnings.append(
+                        _("Supplier {0}: Bank Account {1} has no IBAN.").format(
+                            display_name, supplier.default_bank_account
+                        )
+                    )
+            except frappe.DoesNotExistError:
+                warnings.append(
+                    _("Supplier {0}: Bank Account {1} not found.").format(
+                        display_name, supplier.default_bank_account
+                    )
+                )
+
+        # Check supplier address
         supplier_addr = _get_supplier_address(inv["supplier"])
         missing = []
         if not supplier_addr["street"]:
@@ -157,7 +186,6 @@ def validate_sepa_export(invoice_names, company):
         if not supplier_addr["city"]:
             missing.append(_("City"))
         if missing:
-            display_name = inv["supplier_name"] or inv["supplier"]
             warnings.append(
                 _("Supplier {0} address is missing: {1}").format(
                     display_name, ", ".join(missing)

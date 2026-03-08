@@ -230,25 +230,33 @@ def export_payment_instruction_xml(
         supplier = frappe.get_doc("Supplier", inv["supplier"])
 
         # Get bank account info from the Supplier's default bank account
-        supplier_iban = "NOTPROVIDED"
+        supplier_iban = ""
+        display_name = inv["supplier_name"] or inv["supplier"]
 
         if supplier.default_bank_account:
             try:
                 bank_account = frappe.get_doc(
                     "Bank Account", supplier.default_bank_account
                 )
-                supplier_iban = bank_account.iban or "NOTPROVIDED"
+                supplier_iban = bank_account.iban or ""
             except frappe.DoesNotExistError:
                 frappe.throw(
-                    _("Bank account {0} not found for supplier {1}").format(
-                        supplier.default_bank_account, supplier.name
-                    )
+                    _(
+                        "Bank Account {0} not found for supplier {1}. Please fix the supplier's default bank account."
+                    ).format(supplier.default_bank_account, display_name)
                 )
         else:
             frappe.throw(
                 _(
                     "Supplier {0} does not have a default bank account configured."
-                ).format(inv["supplier_name"] or inv["supplier"])
+                ).format(display_name)
+            )
+
+        if not supplier_iban:
+            frappe.throw(
+                _(
+                    "Supplier {0}: the Bank Account {1} has no IBAN. Please add an IBAN to the bank account record."
+                ).format(display_name, supplier.default_bank_account)
             )
 
         # Get country and address from the supplier's linked Address record
