@@ -300,18 +300,51 @@ class SEPAExportTool {
 			return;
 		}
 
-		open_url_post(
-			'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
-			{
-				invoice_names: invoice_names.join(','),
-				execution_date: execution_date,
-				debtor_name: this.debtor_info.debtor_name,
-				debtor_iban: this.debtor_info.debtor_iban,
-				debtor_bic: this.debtor_info.debtor_bic || '',
-				debtor_address: this.debtor_info.debtor_address,
-				debtor_country: this.debtor_info.debtor_country,
-				payment_references: JSON.stringify(payment_references)
+		// Validate address fields before export
+		const self = this;
+		frappe.call({
+			method: 'frappe_sepa_export.utils.validate_sepa_export',
+			args: {
+				invoice_names: JSON.stringify(invoice_names),
+				company: company
+			},
+			freeze: true,
+			freeze_message: __('Validating…'),
+			callback(vr) {
+				if (!vr.message) return;
+				const result = vr.message;
+				if (!result.valid) {
+					frappe.confirm(
+						__('The following address fields are incomplete:')
+						+ '<br><br><ul>'
+						+ result.warnings.map(w => `<li>${w}</li>`).join('')
+						+ '</ul><br>'
+						+ __('The bank may reject the file. Continue anyway?'),
+						() => do_export(),
+						() => { }
+					);
+				} else {
+					do_export();
+				}
 			}
-		);
+		});
+
+		function do_export() {
+			open_url_post(
+				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+				{
+					invoice_names: invoice_names.join(','),
+					execution_date: execution_date,
+					debtor_name: self.debtor_info.debtor_name,
+					debtor_iban: self.debtor_info.debtor_iban,
+					debtor_bic: self.debtor_info.debtor_bic || '',
+					debtor_street: self.debtor_info.debtor_street || '',
+					debtor_postcode: self.debtor_info.debtor_postcode || '',
+					debtor_city: self.debtor_info.debtor_city || '',
+					debtor_country: self.debtor_info.debtor_country,
+					payment_references: JSON.stringify(payment_references)
+				}
+			);
+		}
 	}
 }

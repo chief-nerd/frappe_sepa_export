@@ -11,10 +11,10 @@ SEPA_NAMESPACES = {
 
 
 def _get_supplier_address(supplier_name):
-    """Get address details for a supplier from the linked Address record.
+    """Get structured address details for a supplier from the linked Address record.
 
     Returns:
-        tuple: (country_code, address_lines list)
+        dict: {country_code, street, postcode, city}
     """
     address_name = frappe.db.get_value(
         "Dynamic Link",
@@ -26,7 +26,7 @@ def _get_supplier_address(supplier_name):
         "parent",
     )
     if not address_name:
-        return "AT", []
+        return {"country_code": "AT", "street": "", "postcode": "", "city": ""}
 
     address = frappe.get_doc("Address", address_name)
     country_code = (
@@ -36,15 +36,13 @@ def _get_supplier_address(supplier_name):
     )
     country_code = (country_code or "AT").upper()
 
-    lines = []
-    if address.address_line1:
-        lines.append(address.address_line1)
-    if address.address_line2:
-        lines.append(address.address_line2)
-    city_line = " ".join(filter(None, [address.pincode, address.city]))
-    if city_line:
-        lines.append(city_line)
-    return country_code, lines
+    street_parts = list(filter(None, [address.address_line1, address.address_line2]))
+    return {
+        "country_code": country_code,
+        "street": ", ".join(street_parts),
+        "postcode": address.pincode or "",
+        "city": address.city or "",
+    }
 
 
 @frappe.whitelist()
@@ -54,8 +52,10 @@ def export_payment_instruction_xml(
     debtor_name,
     debtor_iban,
     debtor_bic,
-    debtor_address,
     debtor_country,
+    debtor_street="",
+    debtor_postcode="",
+    debtor_city="",
     payment_reference=None,
     payment_references=None,
 ):
@@ -68,17 +68,16 @@ def export_payment_instruction_xml(
         debtor_name (str): Name of the debtor (company making the payment)
         debtor_iban (str): IBAN of the debtor's bank account
         debtor_bic (str): BIC/SWIFT code of the debtor's bank
-        debtor_address (list): List of address lines for the debtor
         debtor_country (str): Country code of the debtor (e.g., "AT" for Austria)
+        debtor_street (str): Street name of the debtor
+        debtor_postcode (str): Postal code of the debtor
+        debtor_city (str): City/town name of the debtor
 
     Returns:
         XML file download response
     """
     if isinstance(invoice_names, str):
         invoice_names = invoice_names.split(",")
-
-    if isinstance(debtor_address, str):
-        debtor_address = debtor_address.split("\n")
 
     # Fetch invoice details
     invoices = frappe.get_all(
@@ -142,9 +141,14 @@ def export_payment_instruction_xml(
     nb_of_txs = len(invoices)
     ctrl_sum = sum(float(inv["outstanding_amount"]) for inv in invoices)
 
-    adr_lines = "".join(
-        f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address if line.strip()
-    )
+    # Build structured debtor address XML
+    debtor_addr_xml = ""
+    if debtor_street:
+        debtor_addr_xml += f"<StrtNm>{escape(debtor_street)}</StrtNm>\n"
+    if debtor_postcode:
+        debtor_addr_xml += f"<PstCd>{escape(debtor_postcode)}</PstCd>\n"
+    if debtor_city:
+        debtor_addr_xml += f"<TwnNm>{escape(debtor_city)}</TwnNm>\n"
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -172,8 +176,7 @@ def export_payment_instruction_xml(
 <Nm>{escape(debtor_name)}</Nm>
 <PstlAdr>
 <Ctry>{escape(debtor_country)}</Ctry>
-{adr_lines}
-</PstlAdr>
+{debtor_addr_xml}</PstlAdr>
 </Dbtr>
 <DbtrAcct>
 <Id>
@@ -216,13 +219,18 @@ def export_payment_instruction_xml(
             )
 
         # Get country and address from the supplier's linked Address record
-        supplier_country, supplier_addr_lines = _get_supplier_address(inv["supplier"])
+        supplier_addr = _get_supplier_address(inv["supplier"])
+        supplier_country = supplier_addr["country_code"]
 
-        address_lines = "".join(
-            f"<AdrLine>{escape(line.strip())}</AdrLine>"
-            for line in supplier_addr_lines
-            if line.strip()
-        )
+        # Build structured creditor address XML
+        creditor_addr_xml = ""
+        if supplier_addr["street"]:
+            creditor_addr_xml += f"<StrtNm>{escape(supplier_addr['street'])}</StrtNm>\n"
+        if supplier_addr["postcode"]:
+            creditor_addr_xml += f"<PstCd>{escape(supplier_addr['postcode'])}</PstCd>\n"
+        if supplier_addr["city"]:
+            creditor_addr_xml += f"<TwnNm>{escape(supplier_addr['city'])}</TwnNm>\n"
+
         rmt_info = inv.get("_payment_reference") or inv.get("remarks") or inv["name"]
 
         xml += f"""
@@ -243,8 +251,7 @@ def export_payment_instruction_xml(
 <Nm>{escape(inv["supplier_name"] or inv["supplier"])}</Nm>
 <PstlAdr>
 <Ctry>{escape(supplier_country)}</Ctry>
-{address_lines}
-</PstlAdr>
+{creditor_addr_xml}</PstlAdr>
 </Cdtr>
 <CdtrAcct>
 <Id>

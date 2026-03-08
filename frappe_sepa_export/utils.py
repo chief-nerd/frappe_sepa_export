@@ -3,10 +3,10 @@ from frappe import _
 
 
 def _get_company_address(company_name):
-    """Get address details for a company from its linked Address record.
+    """Get structured address details for a company from its linked Address record.
 
     Returns:
-        list: address lines
+        dict: {street, postcode, city}
     """
     address_name = frappe.db.get_value(
         "Dynamic Link",
@@ -18,18 +18,15 @@ def _get_company_address(company_name):
         "parent",
     )
     if not address_name:
-        return []
+        return {"street": "", "postcode": "", "city": ""}
 
     address = frappe.get_doc("Address", address_name)
-    lines = []
-    if address.address_line1:
-        lines.append(address.address_line1)
-    if address.address_line2:
-        lines.append(address.address_line2)
-    city_line = " ".join(filter(None, [address.pincode, address.city]))
-    if city_line:
-        lines.append(city_line)
-    return lines
+    street_parts = list(filter(None, [address.address_line1, address.address_line2]))
+    return {
+        "street": ", ".join(street_parts),
+        "postcode": address.pincode or "",
+        "city": address.city or "",
+    }
 
 
 @frappe.whitelist()
@@ -40,7 +37,7 @@ def get_debtor_info(company):
         company (str): Company name
 
     Returns:
-        dict: debtor_name, debtor_iban, debtor_bic, debtor_country, debtor_address
+        dict: debtor_name, debtor_iban, debtor_bic, debtor_country, debtor_street, debtor_postcode, debtor_city
     """
     try:
         sepa_settings = frappe.get_doc("SEPA Settings", company)
@@ -56,7 +53,9 @@ def get_debtor_info(company):
         "debtor_country": sepa_settings.default_country_code or "AT",
         "debtor_iban": "",
         "debtor_bic": "",
-        "debtor_address": "",
+        "debtor_street": "",
+        "debtor_postcode": "",
+        "debtor_city": "",
     }
 
     if sepa_settings.default_bank_account:
@@ -72,10 +71,84 @@ def get_debtor_info(company):
                 )
             )
 
-    address_lines = _get_company_address(company)
-    result["debtor_address"] = "\n".join(address_lines)
+    addr = _get_company_address(company)
+    result["debtor_street"] = addr["street"]
+    result["debtor_postcode"] = addr["postcode"]
+    result["debtor_city"] = addr["city"]
 
     return result
+
+
+@frappe.whitelist()
+def validate_sepa_export(invoice_names, company):
+    """Pre-flight validation for SEPA export.
+
+    Checks that the debtor (company) and all creditor (supplier) addresses
+    have the required structured fields: street, postcode and city.
+
+    Args:
+        invoice_names (str): JSON-encoded list or comma-separated invoice names
+        company (str): Company name
+
+    Returns:
+        dict: {valid: bool, warnings: list[str]}
+    """
+    import json as _json
+
+    if isinstance(invoice_names, str):
+        try:
+            invoice_names = _json.loads(invoice_names)
+        except (ValueError, TypeError):
+            invoice_names = [n.strip() for n in invoice_names.split(",") if n.strip()]
+
+    warnings = []
+
+    # --- Debtor (company) checks ---
+    addr = _get_company_address(company)
+    missing = []
+    if not addr["street"]:
+        missing.append(_("Street"))
+    if not addr["postcode"]:
+        missing.append(_("Postcode"))
+    if not addr["city"]:
+        missing.append(_("City"))
+    if missing:
+        warnings.append(
+            _("Company {0} address is missing: {1}").format(company, ", ".join(missing))
+        )
+
+    # --- Creditor (supplier) checks ---
+    from frappe_sepa_export.sepa_payment.export import _get_supplier_address
+
+    invoices = frappe.get_all(
+        "Purchase Invoice",
+        filters={"name": ["in", invoice_names]},
+        fields=["name", "supplier", "supplier_name"],
+    )
+
+    checked_suppliers = set()
+    for inv in invoices:
+        if inv["supplier"] in checked_suppliers:
+            continue
+        checked_suppliers.add(inv["supplier"])
+
+        supplier_addr = _get_supplier_address(inv["supplier"])
+        missing = []
+        if not supplier_addr["street"]:
+            missing.append(_("Street"))
+        if not supplier_addr["postcode"]:
+            missing.append(_("Postcode"))
+        if not supplier_addr["city"]:
+            missing.append(_("City"))
+        if missing:
+            display_name = inv["supplier_name"] or inv["supplier"]
+            warnings.append(
+                _("Supplier {0} address is missing: {1}").format(
+                    display_name, ", ".join(missing)
+                )
+            )
+
+    return {"valid": len(warnings) == 0, "warnings": warnings}
 
 
 @frappe.whitelist()

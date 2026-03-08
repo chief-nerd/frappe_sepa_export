@@ -79,24 +79,55 @@ function create_dialog(frm, debtor_info) {
 		],
 		primary_action_label: __('Generate SEPA XML'),
 		primary_action(values) {
-			d.hide();
-			// Build per-invoice reference map
-			const payment_references = JSON.stringify({
-				[frm.doc.name]: values.payment_reference
-			});
-			open_url_post(
-				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
-				{
-					invoice_names: values.invoices,
-					execution_date: values.execution_date,
-					debtor_name: debtor_info.debtor_name,
-					debtor_iban: debtor_info.debtor_iban,
-					debtor_bic: debtor_info.debtor_bic || '',
-					debtor_address: debtor_info.debtor_address,
-					debtor_country: debtor_info.debtor_country,
-					payment_references: payment_references
+			// Validate address fields before export
+			frappe.call({
+				method: 'frappe_sepa_export.utils.validate_sepa_export',
+				args: {
+					invoice_names: JSON.stringify([frm.doc.name]),
+					company: frm.doc.company
+				},
+				freeze: true,
+				freeze_message: __('Validating…'),
+				callback(vr) {
+					if (!vr.message) return;
+					const result = vr.message;
+					if (!result.valid) {
+						frappe.confirm(
+							__('The following address fields are incomplete:')
+							+ '<br><br><ul>'
+							+ result.warnings.map(w => `<li>${w}</li>`).join('')
+							+ '</ul><br>'
+							+ __('The bank may reject the file. Continue anyway?'),
+							() => do_export(),
+							() => { }
+						);
+					} else {
+						do_export();
+					}
 				}
-			);
+			});
+
+			function do_export() {
+				d.hide();
+				const payment_references = JSON.stringify({
+					[frm.doc.name]: values.payment_reference
+				});
+				open_url_post(
+					'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+					{
+						invoice_names: values.invoices,
+						execution_date: values.execution_date,
+						debtor_name: debtor_info.debtor_name,
+						debtor_iban: debtor_info.debtor_iban,
+						debtor_bic: debtor_info.debtor_bic || '',
+						debtor_street: debtor_info.debtor_street || '',
+						debtor_postcode: debtor_info.debtor_postcode || '',
+						debtor_city: debtor_info.debtor_city || '',
+						debtor_country: debtor_info.debtor_country,
+						payment_references: payment_references
+					}
+				);
+			}
 		}
 	});
 
