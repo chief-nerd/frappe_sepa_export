@@ -330,8 +330,10 @@ def get_open_invoices(company):
         company (str): Company name
 
     Returns:
-        list[dict]: invoice records
+        list[dict]: invoice records with supplier bank account IBAN
     """
+    from frappe_sepa_export.sepa_payment.export import _resolve_supplier_bank_account
+
     invoices = frappe.get_all(
         "Purchase Invoice",
         filters={
@@ -353,4 +355,19 @@ def get_open_invoices(company):
         ],
         order_by="posting_date asc",
     )
+
+    # Resolve supplier bank account IBAN (cached per supplier)
+    iban_cache = {}
+    for inv in invoices:
+        supplier = inv["supplier"]
+        if supplier not in iban_cache:
+            bank_account_name = _resolve_supplier_bank_account(supplier)
+            if bank_account_name:
+                iban_cache[supplier] = (
+                    frappe.db.get_value("Bank Account", bank_account_name, "iban") or ""
+                )
+            else:
+                iban_cache[supplier] = ""
+        inv["supplier_iban"] = iban_cache[supplier]
+
     return invoices

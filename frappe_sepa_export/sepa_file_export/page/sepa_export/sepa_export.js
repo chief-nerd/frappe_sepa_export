@@ -154,6 +154,11 @@ class SEPAExportTool {
 				<td style="vertical-align:middle;">
 					${frappe.utils.escape_html(inv.supplier_name || inv.supplier)}
 				</td>
+				<td style="vertical-align:middle; font-family:monospace; font-size:0.9em; white-space:nowrap;">
+					${inv.supplier_iban
+					? frappe.utils.escape_html(inv.supplier_iban)
+					: '<span class="text-danger">' + __('Missing') + '</span>'}
+				</td>
 				<td style="vertical-align:middle;">
 					${frappe.utils.escape_html(inv.bill_no || '–')}
 				</td>
@@ -190,6 +195,7 @@ class SEPAExportTool {
 								</th>
 								<th>${__('Invoice')}</th>
 								<th>${__('Supplier')}</th>
+								<th>${__('Bank Account (IBAN)')}</th>
 								<th>${__('Supplier Inv. No.')}</th>
 								<th>${__('Date')}</th>
 								<th style="text-align:right;">${__('Amount')}</th>
