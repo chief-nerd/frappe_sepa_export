@@ -141,14 +141,11 @@ def export_payment_instruction_xml(
     nb_of_txs = len(invoices)
     ctrl_sum = sum(float(inv["outstanding_amount"]) for inv in invoices)
 
-    # Build structured debtor address XML
-    debtor_addr_xml = ""
-    if debtor_street:
-        debtor_addr_xml += f"<StrtNm>{escape(debtor_street)}</StrtNm>\n"
-    if debtor_postcode:
-        debtor_addr_xml += f"<PstCd>{escape(debtor_postcode)}</PstCd>\n"
-    if debtor_city:
-        debtor_addr_xml += f"<TwnNm>{escape(debtor_city)}</TwnNm>\n"
+    # Build structured debtor address XML (all fields required by schema)
+    debtor_addr_xml = f"""<StrtNm>{escape(debtor_street)}</StrtNm>
+<PstCd>{escape(debtor_postcode)}</PstCd>
+<TwnNm>{escape(debtor_city)}</TwnNm>
+"""
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -222,14 +219,11 @@ def export_payment_instruction_xml(
         supplier_addr = _get_supplier_address(inv["supplier"])
         supplier_country = supplier_addr["country_code"]
 
-        # Build structured creditor address XML
-        creditor_addr_xml = ""
-        if supplier_addr["street"]:
-            creditor_addr_xml += f"<StrtNm>{escape(supplier_addr['street'])}</StrtNm>\n"
-        if supplier_addr["postcode"]:
-            creditor_addr_xml += f"<PstCd>{escape(supplier_addr['postcode'])}</PstCd>\n"
-        if supplier_addr["city"]:
-            creditor_addr_xml += f"<TwnNm>{escape(supplier_addr['city'])}</TwnNm>\n"
+        # Build structured creditor address XML (all fields required by schema)
+        creditor_addr_xml = f"""<StrtNm>{escape(supplier_addr["street"])}</StrtNm>
+<PstCd>{escape(supplier_addr["postcode"])}</PstCd>
+<TwnNm>{escape(supplier_addr["city"])}</TwnNm>
+"""
 
         rmt_info = inv.get("_payment_reference") or inv.get("remarks") or inv["name"]
 
