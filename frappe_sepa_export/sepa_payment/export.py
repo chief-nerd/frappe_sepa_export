@@ -118,6 +118,14 @@ def export_payment_instruction_xml(
     if not invoices:
         frappe.throw(_("No invoices found for the given names."))
 
+    # Validate debtor IBAN is present
+    if not debtor_iban:
+        frappe.throw(
+            _(
+                "Debtor IBAN is missing. Please configure a default bank account in SEPA Settings."
+            )
+        )
+
     # Build per-invoice payment reference map
     import json as _json
 
