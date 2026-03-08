@@ -31,6 +31,30 @@ def _t(value, field):
     return value
 
 
+def _resolve_supplier_bank_account(supplier_name):
+    """Resolve the bank account for a supplier.
+
+    Lookup chain:
+        1. Supplier.default_bank_account
+        2. Bank Account linked via party_type/party
+
+    Returns:
+        str or None: Bank Account name, or None if not found
+    """
+    supplier = frappe.get_doc("Supplier", supplier_name)
+
+    if supplier.default_bank_account:
+        return supplier.default_bank_account
+
+    # Fallback: find a Bank Account linked to this Supplier
+    linked = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": "Supplier", "party": supplier_name, "is_company_account": 0},
+        "name",
+    )
+    return linked or None
+
+
 def _get_supplier_address(supplier_name):
     """Get structured address details for a supplier from the linked Address record.
 
@@ -227,28 +251,26 @@ def export_payment_instruction_xml(
 
     for idx, inv in enumerate(invoices, 1):
         # Fetch Supplier data
-        supplier = frappe.get_doc("Supplier", inv["supplier"])
-
-        # Get bank account info from the Supplier's default bank account
-        supplier_iban = ""
         display_name = inv["supplier_name"] or inv["supplier"]
 
-        if supplier.default_bank_account:
+        # Resolve bank account: default_bank_account > linked Bank Account
+        bank_account_name = _resolve_supplier_bank_account(inv["supplier"])
+        supplier_iban = ""
+
+        if bank_account_name:
             try:
-                bank_account = frappe.get_doc(
-                    "Bank Account", supplier.default_bank_account
-                )
+                bank_account = frappe.get_doc("Bank Account", bank_account_name)
                 supplier_iban = bank_account.iban or ""
             except frappe.DoesNotExistError:
                 frappe.throw(
                     _(
-                        "Bank Account {0} not found for supplier {1}. Please fix the supplier's default bank account."
-                    ).format(supplier.default_bank_account, display_name)
+                        "Bank Account {0} not found for supplier {1}. Please fix the supplier's bank account configuration."
+                    ).format(bank_account_name, display_name)
                 )
         else:
             frappe.throw(
                 _(
-                    "Supplier {0} does not have a default bank account configured."
+                    "No bank account found for supplier {0}. Please set a default bank account or link a Bank Account record to the supplier."
                 ).format(display_name)
             )
 
@@ -256,7 +278,7 @@ def export_payment_instruction_xml(
             frappe.throw(
                 _(
                     "Supplier {0}: the Bank Account {1} has no IBAN. Please add an IBAN to the bank account record."
-                ).format(display_name, supplier.default_bank_account)
+                ).format(display_name, bank_account_name)
             )
 
         # Get country and address from the supplier's linked Address record
