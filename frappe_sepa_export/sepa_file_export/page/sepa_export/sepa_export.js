@@ -330,9 +330,9 @@ class SEPAExportTool {
 		});
 
 		function do_export() {
-			open_url_post(
-				'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
-				{
+			frappe.call({
+				method: 'frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+				args: {
 					invoice_names: invoice_names.join(','),
 					execution_date: execution_date,
 					debtor_name: self.debtor_info.debtor_name,
@@ -343,8 +343,21 @@ class SEPAExportTool {
 					debtor_city: self.debtor_info.debtor_city || '',
 					debtor_country: self.debtor_info.debtor_country,
 					payment_references: JSON.stringify(payment_references)
+				},
+				freeze: true,
+				freeze_message: __('Generating SEPA XML…'),
+				callback(r) {
+					if (r.message) {
+						const blob = new Blob([r.message.filecontent], { type: 'application/xml' });
+						const url = URL.createObjectURL(blob);
+						const a = document.createElement('a');
+						a.href = url;
+						a.download = r.message.filename;
+						a.click();
+						URL.revokeObjectURL(url);
+					}
 				}
-			);
+			});
 		}
 	}
 }

@@ -112,9 +112,9 @@ function create_dialog(frm, debtor_info) {
 				const payment_references = JSON.stringify({
 					[frm.doc.name]: values.payment_reference
 				});
-				open_url_post(
-					'/api/method/frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
-					{
+				frappe.call({
+					method: 'frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml',
+					args: {
 						invoice_names: values.invoices,
 						execution_date: values.execution_date,
 						debtor_name: debtor_info.debtor_name,
@@ -125,8 +125,21 @@ function create_dialog(frm, debtor_info) {
 						debtor_city: debtor_info.debtor_city || '',
 						debtor_country: debtor_info.debtor_country,
 						payment_references: payment_references
+					},
+					freeze: true,
+					freeze_message: __('Generating SEPA XML…'),
+					callback(r) {
+						if (r.message) {
+							const blob = new Blob([r.message.filecontent], { type: 'application/xml' });
+							const url = URL.createObjectURL(blob);
+							const a = document.createElement('a');
+							a.href = url;
+							a.download = r.message.filename;
+							a.click();
+							URL.revokeObjectURL(url);
+						}
 					}
-				);
+				});
 			}
 		}
 	});

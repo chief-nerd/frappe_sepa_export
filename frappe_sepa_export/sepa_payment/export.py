@@ -331,8 +331,7 @@ def export_payment_instruction_xml(
 </Document>
 """
 
-    frappe.local.response.filename = (
-        f"payment_instruction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
-    )
-    frappe.local.response.filecontent = xml
-    frappe.local.response.type = "download"
+    return {
+        "filename": f"payment_instruction_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml",
+        "filecontent": xml,
+    }
