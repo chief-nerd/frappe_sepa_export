@@ -42,7 +42,7 @@ function create_dialog(frm, debtor_info) {
 				label: __('Amount'),
 				fieldname: 'amount',
 				fieldtype: 'Currency',
-				default: frm.doc.grand_total,
+				default: frm.doc.outstanding_amount,
 				read_only: 1
 			},
 			{

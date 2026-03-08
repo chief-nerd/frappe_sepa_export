@@ -141,7 +141,7 @@ class SEPAExportTool {
 
 			rows += `
 			<tr data-invoice="${frappe.utils.escape_html(inv.name)}"
-			    data-amount="${inv.grand_total}">
+			    data-amount="${inv.outstanding_amount}">
 				<td class="text-center" style="vertical-align:middle; width:40px;">
 					<input type="checkbox" class="sepa-row-check" checked />
 				</td>
@@ -161,7 +161,7 @@ class SEPAExportTool {
 					${frappe.utils.escape_html(inv.posting_date || '')}
 				</td>
 				<td style="vertical-align:middle; text-align:right; font-variant-numeric:tabular-nums;">
-					${format_currency(inv.grand_total, inv.currency || 'EUR')}
+					${format_currency(inv.outstanding_amount, inv.currency || 'EUR')}
 				</td>
 				<td style="vertical-align:middle;">
 					<span class="indicator-pill ${status_color}">

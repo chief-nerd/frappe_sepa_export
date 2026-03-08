@@ -62,7 +62,7 @@ function start_bulk_sepa_export(selected_docs) {
 
 function show_bulk_review_dialog(invoices, debtor_info) {
 	// Build HTML table with editable reference fields
-	const total = invoices.reduce((s, inv) => s + inv.grand_total, 0);
+	const total = invoices.reduce((s, inv) => s + inv.outstanding_amount, 0);
 
 	const d = new frappe.ui.Dialog({
 		title: __('Review & Export SEPA Payment Bundle'),
@@ -181,7 +181,7 @@ function build_review_table(invoices) {
 			<td style="vertical-align:middle;">${frappe.utils.escape_html(inv.supplier_name || inv.supplier)}</td>
 			<td style="vertical-align:middle;">${frappe.utils.escape_html(inv.bill_no || '–')}</td>
 			<td style="vertical-align:middle; text-align:right; font-variant-numeric:tabular-nums;">
-				${format_currency(inv.grand_total, inv.currency || 'EUR')}
+				${format_currency(inv.outstanding_amount, inv.currency || 'EUR')}
 			</td>
 			<td style="vertical-align:middle;">
 				<span class="indicator-pill ${status_color}">${frappe.utils.escape_html(inv.status)}</span>
