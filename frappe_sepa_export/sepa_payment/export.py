@@ -1,93 +1,63 @@
+"""SEPA XML generation — pain.001.001.03 (STUZZA Austrian variant).
+
+This module is responsible solely for building the XML document.
+All data-resolution helpers live in :mod:`frappe_sepa_export.utils`.
+"""
+
+import json
+
 import frappe
 from frappe import _
-from xml.sax.saxutils import escape
 from datetime import datetime
+from xml.sax.saxutils import escape
 
+from frappe_sepa_export.utils import (
+    _t,
+    _strip_iban,
+    _get_supplier_address,
+    _resolve_supplier_bank_account,
+    _get_bank_details,
+)
 
 SEPA_NAMESPACES = {
     "pain.001.001.03": "ISO:pain.001.001.03:APC:STUZZA:payments:003",
     "pain.001.001.02": "ISO:pain.001.001.02:APC:STUZZA:payments:002",
 }
 
-# ISO 20022 pain.001.001.03 field length limits
-_MAX_LEN = {
-    "Nm": 70,
-    "StrtNm": 70,
-    "PstCd": 16,
-    "TwnNm": 35,
-    "EndToEndId": 35,
-    "InstrId": 35,
-    "MsgId": 35,
-    "PmtInfId": 35,
-    "Ustrd": 140,
-}
+
+# ────────────────────────────────────────────────────────────────────
+# XML formatting helpers
+# ────────────────────────────────────────────────────────────────────
 
 
-def _t(value, field):
-    """Truncate a value to the ISO 20022 max length for the given field."""
-    max_len = _MAX_LEN.get(field)
-    if max_len and len(value) > max_len:
-        return value[:max_len]
-    return value
+def _bic_xml(bic):
+    """Return the ``<FinInstnId>`` inner XML for a BIC value.
 
-
-def _resolve_supplier_bank_account(supplier_name):
-    """Resolve the bank account for a supplier.
-
-    Lookup chain:
-        1. Supplier.default_bank_account
-        2. Bank Account linked via party_type/party
-
-    Returns:
-        str or None: Bank Account name, or None if not found
+    Uses ``<BIC>`` when the value is a valid 8- or 11-char alphanumeric
+    code, otherwise falls back to ``<Othr><Id>NOTPROVIDED</Id></Othr>``.
     """
-    supplier = frappe.get_doc("Supplier", supplier_name)
-
-    if supplier.default_bank_account:
-        return supplier.default_bank_account
-
-    # Fallback: find a Bank Account linked to this Supplier
-    linked = frappe.db.get_value(
-        "Bank Account",
-        {"party_type": "Supplier", "party": supplier_name, "disabled": 0},
-        "name",
-    )
-    return linked or None
+    bic = (bic or "").strip()
+    if bic and len(bic) in (8, 11) and bic.isalnum():
+        return f"<BIC>{escape(bic)}</BIC>"
+    return "<Othr><Id>NOTPROVIDED</Id></Othr>"
 
 
-def _get_supplier_address(supplier_name):
-    """Get structured address details for a supplier from the linked Address record.
+def _addr_xml(street, postcode, city, country):
+    """Build the ``<PstlAdr>`` child elements (PostalAddress6 sequence).
 
-    Returns:
-        dict: {country_code, street, postcode, city}
+    XSD element order: StrtNm, BldgNb, PstCd, TwnNm, CtrySubDvsn, Ctry.
     """
-    address_name = frappe.db.get_value(
-        "Dynamic Link",
-        {
-            "link_doctype": "Supplier",
-            "link_name": supplier_name,
-            "parenttype": "Address",
-        },
-        "parent",
+    return (
+        f"<StrtNm>{escape(_t(street, 'StrtNm'))}</StrtNm>\n"
+        f"<PstCd>{escape(_t(postcode, 'PstCd'))}</PstCd>\n"
+        f"<TwnNm>{escape(_t(city, 'TwnNm'))}</TwnNm>\n"
+        f"<Ctry>{escape(country)}</Ctry>\n"
     )
-    if not address_name:
-        return {"country_code": "AT", "street": "", "postcode": "", "city": ""}
 
-    address = frappe.get_doc("Address", address_name)
-    country_code = (
-        frappe.db.get_value("Country", address.country, "code")
-        if address.country
-        else "AT"
-    )
-    country_code = (country_code or "AT").upper()
 
-    street_parts = list(filter(None, [address.address_line1, address.address_line2]))
-    return {
-        "country_code": country_code,
-        "street": ", ".join(street_parts),
-        "postcode": address.pincode or "",
-        "city": address.city or "",
-    }
+# ────────────────────────────────────────────────────────────────────
+# Main export endpoint
+# ────────────────────────────────────────────────────────────────────
 
 
 @frappe.whitelist()
@@ -101,30 +71,37 @@ def export_payment_instruction_xml(
     debtor_street="",
     debtor_postcode="",
     debtor_city="",
-    payment_reference=None,
     payment_references=None,
 ):
-    """
-    Generate SEPA XML Payment Instruction file (pain.001.001.03) for purchase invoices
+    """Generate a SEPA XML Payment Instruction file (pain.001.001.03).
 
     Args:
-        invoice_names (str): Comma-separated list of Purchase Invoice names
-        execution_date (str): Requested execution date in YYYY-MM-DD format
-        debtor_name (str): Name of the debtor (company making the payment)
-        debtor_iban (str): IBAN of the debtor's bank account
-        debtor_bic (str): BIC/SWIFT code of the debtor's bank
-        debtor_country (str): Country code of the debtor (e.g., "AT" for Austria)
-        debtor_street (str): Street name of the debtor
-        debtor_postcode (str): Postal code of the debtor
-        debtor_city (str): City/town name of the debtor
+        invoice_names:       Comma-separated Purchase Invoice names.
+        execution_date:      Requested execution date (YYYY-MM-DD).
+        debtor_name:         Name of the debtor (company).
+        debtor_iban:         IBAN of the debtor's bank account.
+        debtor_bic:          BIC/SWIFT of the debtor's bank.
+        debtor_country:      ISO country code of the debtor.
+        debtor_street:       Street of the debtor.
+        debtor_postcode:     Postal code of the debtor.
+        debtor_city:         City/town of the debtor.
+        payment_references:  JSON-encoded ``{invoice_name: reference}`` map.
 
     Returns:
-        XML file download response
+        dict: ``{filename, filecontent}`` — XML as a string.
     """
+    # ── Parse inputs ──────────────────────────────────────────────
     if isinstance(invoice_names, str):
-        invoice_names = invoice_names.split(",")
+        invoice_names = [n.strip() for n in invoice_names.split(",") if n.strip()]
 
-    # Fetch invoice details
+    ref_map = {}
+    if payment_references:
+        if isinstance(payment_references, str):
+            ref_map = json.loads(payment_references)
+        elif isinstance(payment_references, dict):
+            ref_map = payment_references
+
+    # ── Fetch invoices ────────────────────────────────────────────
     invoices = frappe.get_all(
         "Purchase Invoice",
         filters={"name": ["in", invoice_names]},
@@ -142,42 +119,30 @@ def export_payment_instruction_xml(
     if not invoices:
         frappe.throw(_("No invoices found for the given names."))
 
-    # Validate debtor IBAN is present
-    if not debtor_iban:
-        frappe.throw(
-            _(
-                "Debtor IBAN is missing. Please configure a default bank account in SEPA Settings."
-            )
-        )
-
-    # Build per-invoice payment reference map
-    import json as _json
-
-    ref_map = {}
-    if payment_references:
-        if isinstance(payment_references, str):
-            ref_map = _json.loads(payment_references)
-        elif isinstance(payment_references, dict):
-            ref_map = payment_references
-
-    # Fall back to legacy single-reference parameter
-    if payment_reference and not ref_map:
-        for inv in invoices:
-            ref_map[inv["name"]] = payment_reference
-
+    # Attach per-invoice payment reference
     for inv in invoices:
         inv["_payment_reference"] = ref_map.get(inv["name"])
 
-    # Validate all invoices are in EUR
+    # ── Validate ──────────────────────────────────────────────────
+    debtor_iban = _strip_iban(debtor_iban)
+    if not debtor_iban:
+        frappe.throw(
+            _(
+                "Debtor IBAN is missing. "
+                "Please configure a default bank account in SEPA Settings."
+            )
+        )
+
     non_eur = [inv["name"] for inv in invoices if inv["currency"] != "EUR"]
     if non_eur:
         frappe.throw(
             _(
-                "SEPA only supports EUR. The following invoices have a different currency: {0}"
+                "SEPA only supports EUR. "
+                "The following invoices have a different currency: {0}"
             ).format(", ".join(non_eur))
         )
 
-    # Determine SEPA schema namespace from settings (if available)
+    # ── SEPA schema ───────────────────────────────────────────────
     company = frappe.db.get_value("Purchase Invoice", invoices[0]["name"], "company")
     schema_version = "pain.001.001.03"
     try:
@@ -187,26 +152,16 @@ def export_payment_instruction_xml(
         pass
     namespace = SEPA_NAMESPACES.get(schema_version, SEPA_NAMESPACES["pain.001.001.03"])
 
-    # Header values
+    # ── Header values ─────────────────────────────────────────────
     msg_id = datetime.now().strftime("%m%d%H%M") + frappe.generate_hash(length=16)
     pmt_inf_id = msg_id[:16]
     now_iso = datetime.now().isoformat(timespec="seconds")
     nb_of_txs = len(invoices)
     ctrl_sum = sum(float(inv["outstanding_amount"]) for inv in invoices)
 
-    # Build structured debtor address XML (all fields required by schema)
-    # PostalAddress6 sequence: StrtNm, BldgNb, PstCd, TwnNm, CtrySubDvsn, Ctry
-    debtor_addr_xml = f"""<StrtNm>{escape(_t(debtor_street, "StrtNm"))}</StrtNm>
-<PstCd>{escape(_t(debtor_postcode, "PstCd"))}</PstCd>
-<TwnNm>{escape(_t(debtor_city, "TwnNm"))}</TwnNm>
-<Ctry>{escape(debtor_country)}</Ctry>
-"""
-
-    # BIC element – use <Othr><Id>NOTPROVIDED</Id></Othr> when no valid BIC
-    if debtor_bic and len(debtor_bic) in (8, 11) and debtor_bic.isalnum():
-        debtor_agt_id = f"<BIC>{escape(debtor_bic)}</BIC>"
-    else:
-        debtor_agt_id = "<Othr><Id>NOTPROVIDED</Id></Othr>"
+    # ── Build XML ─────────────────────────────────────────────────
+    debtor_addr = _addr_xml(debtor_street, debtor_postcode, debtor_city, debtor_country)
+    debtor_agt = _bic_xml(debtor_bic)
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -233,7 +188,7 @@ def export_payment_instruction_xml(
 <Dbtr>
 <Nm>{escape(_t(debtor_name, "Nm"))}</Nm>
 <PstlAdr>
-{debtor_addr_xml}</PstlAdr>
+{debtor_addr}</PstlAdr>
 </Dbtr>
 <DbtrAcct>
 <Id>
@@ -243,55 +198,48 @@ def export_payment_instruction_xml(
 </DbtrAcct>
 <DbtrAgt>
 <FinInstnId>
-{debtor_agt_id}
+{debtor_agt}
 </FinInstnId>
 </DbtrAgt>
 <ChrgBr>SLEV</ChrgBr>
 """
 
     for idx, inv in enumerate(invoices, 1):
-        # Fetch Supplier data
-        display_name = inv["supplier_name"] or inv["supplier"]
+        display = inv["supplier_name"] or inv["supplier"]
 
-        # Resolve bank account: default_bank_account > linked Bank Account
-        bank_account_name = _resolve_supplier_bank_account(inv["supplier"])
-        supplier_iban = ""
-
-        if bank_account_name:
-            try:
-                bank_account = frappe.get_doc("Bank Account", bank_account_name)
-                supplier_iban = bank_account.iban or ""
-            except frappe.DoesNotExistError:
-                frappe.throw(
-                    _(
-                        "Bank Account {0} not found for supplier {1}. Please fix the supplier's bank account configuration."
-                    ).format(bank_account_name, display_name)
-                )
-        else:
+        # ── Resolve supplier bank details ─────────────────────────
+        ba_name = _resolve_supplier_bank_account(inv["supplier"])
+        if not ba_name:
             frappe.throw(
                 _(
-                    "No bank account found for supplier {0}. Please set a default bank account or link a Bank Account record to the supplier."
-                ).format(display_name)
+                    "No bank account found for supplier {0}. "
+                    "Please set a default bank account or link a "
+                    "Bank Account record to the supplier."
+                ).format(display)
             )
+
+        details = _get_bank_details(ba_name)
+        supplier_iban = details["iban"]
+        supplier_bic = details["bic"]
 
         if not supplier_iban:
             frappe.throw(
                 _(
-                    "Supplier {0}: the Bank Account {1} has no IBAN. Please add an IBAN to the bank account record."
-                ).format(display_name, bank_account_name)
+                    "Supplier {0}: Bank Account {1} has no IBAN. "
+                    "Please add an IBAN to the bank account record."
+                ).format(display, ba_name)
             )
 
-        # Get country and address from the supplier's linked Address record
+        # ── Supplier address ──────────────────────────────────────
         supplier_addr = _get_supplier_address(inv["supplier"])
-        supplier_country = supplier_addr["country_code"]
 
-        # Build structured creditor address XML (all fields required by schema)
-        # PostalAddress6 sequence: StrtNm, BldgNb, PstCd, TwnNm, CtrySubDvsn, Ctry
-        creditor_addr_xml = f"""<StrtNm>{escape(_t(supplier_addr["street"], "StrtNm"))}</StrtNm>
-<PstCd>{escape(_t(supplier_addr["postcode"], "PstCd"))}</PstCd>
-<TwnNm>{escape(_t(supplier_addr["city"], "TwnNm"))}</TwnNm>
-<Ctry>{escape(supplier_country)}</Ctry>
-"""
+        creditor_addr = _addr_xml(
+            supplier_addr["street"],
+            supplier_addr["postcode"],
+            supplier_addr["city"],
+            supplier_addr["country_code"],
+        )
+        creditor_agt = _bic_xml(supplier_bic)
 
         rmt_info = inv.get("_payment_reference") or inv.get("remarks") or inv["name"]
 
@@ -306,13 +254,13 @@ def export_payment_instruction_xml(
 </Amt>
 <CdtrAgt>
 <FinInstnId>
-<Othr><Id>NOTPROVIDED</Id></Othr>
+{creditor_agt}
 </FinInstnId>
 </CdtrAgt>
 <Cdtr>
-<Nm>{escape(_t(inv["supplier_name"] or inv["supplier"], "Nm"))}</Nm>
+<Nm>{escape(_t(display, "Nm"))}</Nm>
 <PstlAdr>
-{creditor_addr_xml}</PstlAdr>
+{creditor_addr}</PstlAdr>
 </Cdtr>
 <CdtrAcct>
 <Id>

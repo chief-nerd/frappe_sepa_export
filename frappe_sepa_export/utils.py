@@ -1,52 +1,194 @@
+"""Shared helpers and whitelisted API endpoints for SEPA File Export.
+
+Every data-resolution helper used by both ``utils`` (validation / UI)
+and ``export`` (XML generation) is defined here so that there is a
+single source of truth and a one-way dependency:
+``export.py`` → ``utils.py``.
+"""
+
+import json
+
 import frappe
 from frappe import _
 
 
-def _get_company_address(company_name):
-    """Get structured address details for a company from its linked Address record.
+# ────────────────────────────────────────────────────────────────────
+# ISO 20022 pain.001.001.03 — field-length limits
+# ────────────────────────────────────────────────────────────────────
+
+_MAX_LEN = {
+    "Nm": 70,
+    "StrtNm": 70,
+    "PstCd": 16,
+    "TwnNm": 35,
+    "EndToEndId": 35,
+    "InstrId": 35,
+    "MsgId": 35,
+    "PmtInfId": 35,
+    "Ustrd": 140,
+}
+
+
+# ────────────────────────────────────────────────────────────────────
+# Low-level helpers
+# ────────────────────────────────────────────────────────────────────
+
+
+def _t(value, field):
+    """Truncate *value* to the ISO 20022 max length for *field*.
+
+    Returns an empty string when *value* is ``None`` or empty.
+    """
+    if not value:
+        return ""
+    value = str(value)
+    max_len = _MAX_LEN.get(field)
+    if max_len and len(value) > max_len:
+        return value[:max_len]
+    return value
+
+
+def _strip_iban(iban):
+    """Remove spaces and normalise an IBAN for XML output."""
+    if not iban:
+        return ""
+    return iban.replace(" ", "").strip().upper()
+
+
+# ── Address resolution ─────────────────────────────────────────────
+
+
+def _get_entity_address(link_doctype, link_name):
+    """Resolve a structured postal address via *Dynamic Link → Address*.
+
+    Works for any entity type (Company, Supplier, …) that links to
+    Address through a Dynamic Link child table.
 
     Returns:
-        dict: {street, postcode, city}
+        dict: ``{country_code, street, postcode, city}``
     """
     address_name = frappe.db.get_value(
         "Dynamic Link",
-        {
-            "link_doctype": "Company",
-            "link_name": company_name,
-            "parenttype": "Address",
-        },
+        {"link_doctype": link_doctype, "link_name": link_name, "parenttype": "Address"},
         "parent",
     )
     if not address_name:
-        return {"street": "", "postcode": "", "city": ""}
+        return {"country_code": "AT", "street": "", "postcode": "", "city": ""}
 
-    address = frappe.get_doc("Address", address_name)
-    street_parts = list(filter(None, [address.address_line1, address.address_line2]))
+    addr = frappe.db.get_value(
+        "Address",
+        address_name,
+        ["address_line1", "address_line2", "pincode", "city", "country"],
+        as_dict=True,
+    )
+    if not addr:
+        return {"country_code": "AT", "street": "", "postcode": "", "city": ""}
+
+    country_code = "AT"
+    if addr.country:
+        country_code = (
+            frappe.db.get_value("Country", addr.country, "code") or "AT"
+        ).upper()
+
+    street_parts = list(filter(None, [addr.address_line1, addr.address_line2]))
     return {
+        "country_code": country_code,
         "street": ", ".join(street_parts),
-        "postcode": address.pincode or "",
-        "city": address.city or "",
+        "postcode": addr.pincode or "",
+        "city": addr.city or "",
     }
+
+
+def _get_company_address(company_name):
+    """Convenience: postal address for a Company."""
+    return _get_entity_address("Company", company_name)
+
+
+def _get_supplier_address(supplier_name):
+    """Convenience: postal address for a Supplier."""
+    return _get_entity_address("Supplier", supplier_name)
+
+
+# ── Bank-account resolution ───────────────────────────────────────
+
+
+def _resolve_supplier_bank_account(supplier_name):
+    """Resolve the Bank Account *name* for a Supplier.
+
+    Lookup chain:
+        1. ``Supplier.default_bank_account``
+        2. A ``Bank Account`` record linked via ``party_type`` / ``party``
+
+    Returns:
+        str | None
+    """
+    default_ba = frappe.db.get_value("Supplier", supplier_name, "default_bank_account")
+    if default_ba:
+        return default_ba
+
+    linked = frappe.db.get_value(
+        "Bank Account",
+        {"party_type": "Supplier", "party": supplier_name, "disabled": 0},
+        "name",
+    )
+    return linked or None
+
+
+def _get_bank_details(bank_account_name):
+    """Return the IBAN (space-stripped) and BIC for a Bank Account.
+
+    The BIC is resolved from the linked **Bank** record's
+    ``swift_number`` field — *not* ``branch_code``.
+
+    Returns:
+        dict: ``{iban, bic}``
+    """
+    if not bank_account_name:
+        return {"iban": "", "bic": ""}
+
+    ba = frappe.db.get_value(
+        "Bank Account",
+        bank_account_name,
+        ["iban", "bank"],
+        as_dict=True,
+    )
+    if not ba:
+        return {"iban": "", "bic": ""}
+
+    iban = _strip_iban(ba.get("iban"))
+
+    bic = ""
+    if ba.get("bank"):
+        bic = (frappe.db.get_value("Bank", ba["bank"], "swift_number") or "").strip()
+
+    return {"iban": iban, "bic": bic}
+
+
+# ────────────────────────────────────────────────────────────────────
+# Whitelisted API endpoints
+# ────────────────────────────────────────────────────────────────────
 
 
 @frappe.whitelist()
 def get_debtor_info(company):
-    """Fetch debtor information from SEPA Settings and the company's default bank account.
+    """Fetch debtor information for SEPA export.
 
-    Args:
-        company (str): Company name
+    Bank-account resolution chain:
+        1. SEPA Settings → ``default_bank_account``
+        2. Company → ``default_bank_account``
 
     Returns:
-        dict: debtor_name, debtor_iban, debtor_bic, debtor_country, debtor_street, debtor_postcode, debtor_city
+        dict: debtor_name, debtor_iban, debtor_bic, debtor_country,
+              debtor_street, debtor_postcode, debtor_city
     """
-    try:
-        sepa_settings = frappe.get_doc("SEPA Settings", company)
-    except frappe.DoesNotExistError:
+    if not frappe.db.exists("SEPA Settings", company):
         frappe.throw(
             _(
                 "No SEPA Settings found for company {0}. Please create one first."
             ).format(company)
         )
+
+    sepa_settings = frappe.get_doc("SEPA Settings", company)
 
     result = {
         "debtor_name": sepa_settings.default_debtor_name or company,
@@ -58,7 +200,7 @@ def get_debtor_info(company):
         "debtor_city": "",
     }
 
-    # Resolve bank account: SEPA Settings > Company default
+    # Resolve bank account: SEPA Settings → Company default
     bank_account_name = sepa_settings.default_bank_account
     if not bank_account_name:
         bank_account_name = frappe.db.get_value(
@@ -66,14 +208,14 @@ def get_debtor_info(company):
         )
 
     if bank_account_name:
-        try:
-            bank_account = frappe.get_doc("Bank Account", bank_account_name)
-            result["debtor_iban"] = bank_account.iban or ""
-            result["debtor_bic"] = getattr(bank_account, "branch_code", "") or ""
-        except frappe.DoesNotExistError:
+        details = _get_bank_details(bank_account_name)
+        if details["iban"]:
+            result["debtor_iban"] = details["iban"]
+            result["debtor_bic"] = details["bic"]
+        else:
             frappe.msgprint(
                 _(
-                    "Bank Account {0} was not found. Please update SEPA Settings or the Company default bank account."
+                    "Bank Account {0} has no IBAN. Please update the bank account."
                 ).format(bank_account_name),
                 indicator="orange",
                 alert=True,
@@ -81,7 +223,8 @@ def get_debtor_info(company):
     else:
         frappe.msgprint(
             _(
-                "No bank account found for {0}. Please set one in SEPA Settings or in the Company record."
+                "No bank account found for {0}. "
+                "Please set one in SEPA Settings or in the Company record."
             ).format(company),
             indicator="orange",
             alert=True,
@@ -99,27 +242,21 @@ def get_debtor_info(company):
 def validate_sepa_export(invoice_names, company):
     """Pre-flight validation for SEPA export.
 
-    Checks that the debtor (company) and all creditor (supplier) addresses
-    have the required structured fields: street, postcode and city.
-
-    Args:
-        invoice_names (str): JSON-encoded list or comma-separated invoice names
-        company (str): Company name
+    Checks that the debtor (company) and all creditor (supplier)
+    addresses, bank accounts and IBANs are present.
 
     Returns:
-        dict: {valid: bool, warnings: list[str]}
+        dict: ``{valid: bool, warnings: list[str]}``
     """
-    import json as _json
-
     if isinstance(invoice_names, str):
         try:
-            invoice_names = _json.loads(invoice_names)
+            invoice_names = json.loads(invoice_names)
         except (ValueError, TypeError):
             invoice_names = [n.strip() for n in invoice_names.split(",") if n.strip()]
 
     warnings = []
 
-    # --- Debtor (company) checks ---
+    # ── Debtor (company) checks ──
     addr = _get_company_address(company)
     missing = []
     if not addr["street"]:
@@ -133,12 +270,7 @@ def validate_sepa_export(invoice_names, company):
             _("Company {0} address is missing: {1}").format(company, ", ".join(missing))
         )
 
-    # --- Creditor (supplier) checks ---
-    from frappe_sepa_export.sepa_payment.export import (
-        _get_supplier_address,
-        _resolve_supplier_bank_account,
-    )
-
+    # ── Creditor (supplier) checks ──
     invoices = frappe.get_all(
         "Purchase Invoice",
         filters={"name": ["in", invoice_names]},
@@ -151,33 +283,27 @@ def validate_sepa_export(invoice_names, company):
             continue
         checked_suppliers.add(inv["supplier"])
 
-        display_name = inv["supplier_name"] or inv["supplier"]
+        display = inv["supplier_name"] or inv["supplier"]
 
-        # Check supplier bank account & IBAN
-        bank_account_name = _resolve_supplier_bank_account(inv["supplier"])
-        if not bank_account_name:
+        # Bank account & IBAN
+        ba_name = _resolve_supplier_bank_account(inv["supplier"])
+        if not ba_name:
             warnings.append(
                 _(
-                    "Supplier {0} has no bank account. Set a default bank account or link a Bank Account record."
-                ).format(display_name)
+                    "Supplier {0} has no bank account. "
+                    "Set a default bank account or link a Bank Account record."
+                ).format(display)
             )
         else:
-            try:
-                bank_account = frappe.get_doc("Bank Account", bank_account_name)
-                if not bank_account.iban:
-                    warnings.append(
-                        _("Supplier {0}: Bank Account {1} has no IBAN.").format(
-                            display_name, bank_account_name
-                        )
-                    )
-            except frappe.DoesNotExistError:
+            details = _get_bank_details(ba_name)
+            if not details["iban"]:
                 warnings.append(
-                    _("Supplier {0}: Bank Account {1} not found.").format(
-                        display_name, bank_account_name
+                    _("Supplier {0}: Bank Account {1} has no IBAN.").format(
+                        display, ba_name
                     )
                 )
 
-        # Check supplier address
+        # Address
         supplier_addr = _get_supplier_address(inv["supplier"])
         missing = []
         if not supplier_addr["street"]:
@@ -189,7 +315,7 @@ def validate_sepa_export(invoice_names, company):
         if missing:
             warnings.append(
                 _("Supplier {0} address is missing: {1}").format(
-                    display_name, ", ".join(missing)
+                    display, ", ".join(missing)
                 )
             )
 
@@ -198,24 +324,20 @@ def validate_sepa_export(invoice_names, company):
 
 @frappe.whitelist()
 def get_bulk_invoice_details(invoice_names):
-    """Return full details for a list of Purchase Invoices so the
-    client-side review table can be populated.
+    """Return details for a list of Purchase Invoices for the review table.
 
     Args:
-        invoice_names (str): JSON-encoded list of Purchase Invoice names
+        invoice_names: JSON-encoded list of Purchase Invoice names
 
     Returns:
-        list[dict]: invoice records with key fields
+        list[dict]
     """
-    import json
-
     if isinstance(invoice_names, str):
         invoice_names = json.loads(invoice_names)
 
     if not invoice_names:
         return []
 
-    # Fetch WITHOUT docstatus filter so we can report ineligible ones explicitly
     invoices = frappe.get_all(
         "Purchase Invoice",
         filters={"name": ["in", invoice_names]},
@@ -224,7 +346,6 @@ def get_bulk_invoice_details(invoice_names):
             "supplier",
             "supplier_name",
             "bill_no",
-            "grand_total",
             "outstanding_amount",
             "currency",
             "status",
@@ -235,7 +356,6 @@ def get_bulk_invoice_details(invoice_names):
         order_by="posting_date asc",
     )
 
-    # Report invoices that are not submitted
     not_submitted = [inv["name"] for inv in invoices if inv["docstatus"] != 1]
     if not_submitted:
         frappe.throw(
@@ -244,8 +364,8 @@ def get_bulk_invoice_details(invoice_names):
             ).format(", ".join(not_submitted))
         )
 
-    allowed_statuses = {"Unpaid", "Overdue", "Partly Paid"}
-    invalid = [inv["name"] for inv in invoices if inv["status"] not in allowed_statuses]
+    allowed = {"Unpaid", "Overdue", "Partly Paid"}
+    invalid = [inv["name"] for inv in invoices if inv["status"] not in allowed]
     if invalid:
         frappe.throw(
             _(
@@ -254,8 +374,7 @@ def get_bulk_invoice_details(invoice_names):
             ).format(", ".join(invalid))
         )
 
-    # All invoices must belong to the same company
-    companies = set(inv["company"] for inv in invoices)
+    companies = {inv["company"] for inv in invoices}
     if len(companies) > 1:
         frappe.throw(
             _(
@@ -267,74 +386,9 @@ def get_bulk_invoice_details(invoice_names):
 
 
 @frappe.whitelist()
-def validate_supplier_banking_details(supplier_name):
-    """
-    Validate if supplier has necessary banking details for SEPA export.
-
-    Uses the same resolution logic as the export itself:
-        1. Supplier.default_bank_account
-        2. Bank Account linked via party_type / party
-
-    Args:
-        supplier_name: Name of the supplier
-
-    Returns:
-        dict: Status and message
-    """
-    from frappe_sepa_export.sepa_payment.export import _resolve_supplier_bank_account
-
-    bank_account_name = _resolve_supplier_bank_account(supplier_name)
-
-    if not bank_account_name:
-        return {
-            "valid": False,
-            "message": _(
-                "Supplier {0} has no bank account. "
-                "Set the default_bank_account field on the Supplier, "
-                "or create a Bank Account record linked to the Supplier."
-            ).format(supplier_name),
-        }
-
-    try:
-        bank_account = frappe.get_doc("Bank Account", bank_account_name)
-
-        missing_fields = []
-        if not bank_account.iban:
-            missing_fields.append("IBAN")
-
-        if missing_fields:
-            return {
-                "valid": False,
-                "message": _("Bank account {0} is missing required fields: {1}").format(
-                    bank_account_name, ", ".join(missing_fields)
-                ),
-            }
-
-    except frappe.DoesNotExistError:
-        return {
-            "valid": False,
-            "message": _("Bank account {0} for supplier {1} not found").format(
-                bank_account_name, supplier_name
-            ),
-        }
-
-    return {"valid": True}
-
-
-@frappe.whitelist()
 def get_open_invoices(company):
-    """Return all submitted Purchase Invoices that are unpaid / overdue / partly paid
-    for the given company.
-
-    Args:
-        company (str): Company name
-
-    Returns:
-        list[dict]: invoice records with supplier bank account IBAN
-    """
-    from frappe_sepa_export.sepa_payment.export import _resolve_supplier_bank_account
-
-    invoices = frappe.get_all(
+    """Return submitted, open Purchase Invoices for the given company."""
+    return frappe.get_all(
         "Purchase Invoice",
         filters={
             "company": company,
@@ -346,7 +400,6 @@ def get_open_invoices(company):
             "supplier",
             "supplier_name",
             "bill_no",
-            "grand_total",
             "outstanding_amount",
             "currency",
             "status",
@@ -355,19 +408,3 @@ def get_open_invoices(company):
         ],
         order_by="posting_date asc",
     )
-
-    # Resolve supplier bank account IBAN (cached per supplier)
-    iban_cache = {}
-    for inv in invoices:
-        supplier = inv["supplier"]
-        if supplier not in iban_cache:
-            bank_account_name = _resolve_supplier_bank_account(supplier)
-            if bank_account_name:
-                iban_cache[supplier] = (
-                    frappe.db.get_value("Bank Account", bank_account_name, "iban") or ""
-                )
-            else:
-                iban_cache[supplier] = ""
-        inv["supplier_iban"] = iban_cache[supplier]
-
-    return invoices
