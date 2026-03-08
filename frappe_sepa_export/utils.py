@@ -115,23 +115,19 @@ def _get_supplier_address(supplier_name):
 def _resolve_supplier_bank_account(supplier_name):
     """Resolve the Bank Account *name* for a Supplier.
 
-    Lookup chain:
-        1. ``Supplier.default_bank_account``
-        2. A ``Bank Account`` record linked via ``party_type`` / ``party``
+    Finds a ``Bank Account`` record linked via ``party_type`` / ``party``.
 
     Returns:
         str | None
     """
-    default_ba = frappe.db.get_value("Supplier", supplier_name, "default_bank_account")
-    if default_ba:
-        return default_ba
-
-    linked = frappe.db.get_value(
-        "Bank Account",
-        {"party_type": "Supplier", "party": supplier_name, "disabled": 0},
-        "name",
+    return (
+        frappe.db.get_value(
+            "Bank Account",
+            {"party_type": "Supplier", "party": supplier_name, "disabled": 0},
+            "name",
+        )
+        or None
     )
-    return linked or None
 
 
 def _get_bank_details(bank_account_name):
