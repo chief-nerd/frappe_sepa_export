@@ -86,7 +86,7 @@ def export_payment_instruction_xml(
         filters={"name": ["in", invoice_names]},
         fields=[
             "name",
-            "grand_total",
+            "outstanding_amount",
             "currency",
             "supplier",
             "supplier_name",
@@ -140,7 +140,7 @@ def export_payment_instruction_xml(
     pmt_inf_id = msg_id[:16]
     now_iso = datetime.now().isoformat(timespec="seconds")
     nb_of_txs = len(invoices)
-    ctrl_sum = sum(float(inv["grand_total"]) for inv in invoices)
+    ctrl_sum = sum(float(inv["outstanding_amount"]) for inv in invoices)
 
     adr_lines = "".join(
         f"<AdrLine>{escape(line)}</AdrLine>" for line in debtor_address if line.strip()
@@ -232,7 +232,7 @@ def export_payment_instruction_xml(
 <EndToEndId>{inv["name"]}</EndToEndId>
 </PmtId>
 <Amt>
-<InstdAmt Ccy="EUR">{float(inv["grand_total"]):.2f}</InstdAmt>
+<InstdAmt Ccy="EUR">{float(inv["outstanding_amount"]):.2f}</InstdAmt>
 </Amt>
 <CdtrAgt>
 <FinInstnId>
