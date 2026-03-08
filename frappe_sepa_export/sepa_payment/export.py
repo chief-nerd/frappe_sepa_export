@@ -9,6 +9,27 @@ SEPA_NAMESPACES = {
     "pain.001.001.02": "ISO:pain.001.001.02:APC:STUZZA:payments:002",
 }
 
+# ISO 20022 pain.001.001.03 field length limits
+_MAX_LEN = {
+    "Nm": 70,
+    "StrtNm": 70,
+    "PstCd": 16,
+    "TwnNm": 35,
+    "EndToEndId": 35,
+    "InstrId": 35,
+    "MsgId": 35,
+    "PmtInfId": 35,
+    "Ustrd": 140,
+}
+
+
+def _t(value, field):
+    """Truncate a value to the ISO 20022 max length for the given field."""
+    max_len = _MAX_LEN.get(field)
+    if max_len and len(value) > max_len:
+        return value[:max_len]
+    return value
+
 
 def _get_supplier_address(supplier_name):
     """Get structured address details for a supplier from the linked Address record.
@@ -142,25 +163,33 @@ def export_payment_instruction_xml(
     ctrl_sum = sum(float(inv["outstanding_amount"]) for inv in invoices)
 
     # Build structured debtor address XML (all fields required by schema)
-    debtor_addr_xml = f"""<StrtNm>{escape(debtor_street)}</StrtNm>
-<PstCd>{escape(debtor_postcode)}</PstCd>
-<TwnNm>{escape(debtor_city)}</TwnNm>
+    # PostalAddress6 sequence: StrtNm, BldgNb, PstCd, TwnNm, CtrySubDvsn, Ctry
+    debtor_addr_xml = f"""<StrtNm>{escape(_t(debtor_street, "StrtNm"))}</StrtNm>
+<PstCd>{escape(_t(debtor_postcode, "PstCd"))}</PstCd>
+<TwnNm>{escape(_t(debtor_city, "TwnNm"))}</TwnNm>
+<Ctry>{escape(debtor_country)}</Ctry>
 """
+
+    # BIC element – use <Othr><Id>NOTPROVIDED</Id></Othr> when no valid BIC
+    if debtor_bic and len(debtor_bic) in (8, 11) and debtor_bic.isalnum():
+        debtor_agt_id = f"<BIC>{escape(debtor_bic)}</BIC>"
+    else:
+        debtor_agt_id = "<Othr><Id>NOTPROVIDED</Id></Othr>"
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="{namespace}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <CstmrCdtTrfInitn>
 <GrpHdr>
-<MsgId>{msg_id}</MsgId>
+<MsgId>{_t(msg_id, "MsgId")}</MsgId>
 <CreDtTm>{now_iso}</CreDtTm>
 <NbOfTxs>{nb_of_txs}</NbOfTxs>
 <CtrlSum>{ctrl_sum:.2f}</CtrlSum>
 <InitgPty>
-<Nm>{escape(debtor_name)}</Nm>
+<Nm>{escape(_t(debtor_name, "Nm"))}</Nm>
 </InitgPty>
 </GrpHdr>
 <PmtInf>
-<PmtInfId>{pmt_inf_id}</PmtInfId>
+<PmtInfId>{_t(pmt_inf_id, "PmtInfId")}</PmtInfId>
 <PmtMtd>TRF</PmtMtd>
 <BtchBookg>true</BtchBookg>
 <PmtTpInf>
@@ -170,9 +199,8 @@ def export_payment_instruction_xml(
 </PmtTpInf>
 <ReqdExctnDt>{execution_date}</ReqdExctnDt>
 <Dbtr>
-<Nm>{escape(debtor_name)}</Nm>
+<Nm>{escape(_t(debtor_name, "Nm"))}</Nm>
 <PstlAdr>
-<Ctry>{escape(debtor_country)}</Ctry>
 {debtor_addr_xml}</PstlAdr>
 </Dbtr>
 <DbtrAcct>
@@ -183,7 +211,7 @@ def export_payment_instruction_xml(
 </DbtrAcct>
 <DbtrAgt>
 <FinInstnId>
-<BIC>{escape(debtor_bic) if debtor_bic else "NOTPROVIDED"}</BIC>
+{debtor_agt_id}
 </FinInstnId>
 </DbtrAgt>
 <ChrgBr>SLEV</ChrgBr>
@@ -220,9 +248,11 @@ def export_payment_instruction_xml(
         supplier_country = supplier_addr["country_code"]
 
         # Build structured creditor address XML (all fields required by schema)
-        creditor_addr_xml = f"""<StrtNm>{escape(supplier_addr["street"])}</StrtNm>
-<PstCd>{escape(supplier_addr["postcode"])}</PstCd>
-<TwnNm>{escape(supplier_addr["city"])}</TwnNm>
+        # PostalAddress6 sequence: StrtNm, BldgNb, PstCd, TwnNm, CtrySubDvsn, Ctry
+        creditor_addr_xml = f"""<StrtNm>{escape(_t(supplier_addr["street"], "StrtNm"))}</StrtNm>
+<PstCd>{escape(_t(supplier_addr["postcode"], "PstCd"))}</PstCd>
+<TwnNm>{escape(_t(supplier_addr["city"], "TwnNm"))}</TwnNm>
+<Ctry>{escape(supplier_country)}</Ctry>
 """
 
         rmt_info = inv.get("_payment_reference") or inv.get("remarks") or inv["name"]
@@ -230,21 +260,20 @@ def export_payment_instruction_xml(
         xml += f"""
 <CdtTrfTxInf>
 <PmtId>
-<InstrId>{str(idx).zfill(8)}</InstrId>
-<EndToEndId>{inv["name"]}</EndToEndId>
+<InstrId>{_t(str(idx).zfill(8), "InstrId")}</InstrId>
+<EndToEndId>{_t(inv["name"], "EndToEndId")}</EndToEndId>
 </PmtId>
 <Amt>
 <InstdAmt Ccy="EUR">{float(inv["outstanding_amount"]):.2f}</InstdAmt>
 </Amt>
 <CdtrAgt>
 <FinInstnId>
-<BIC>NOTPROVIDED</BIC>
+<Othr><Id>NOTPROVIDED</Id></Othr>
 </FinInstnId>
 </CdtrAgt>
 <Cdtr>
-<Nm>{escape(inv["supplier_name"] or inv["supplier"])}</Nm>
+<Nm>{escape(_t(inv["supplier_name"] or inv["supplier"], "Nm"))}</Nm>
 <PstlAdr>
-<Ctry>{escape(supplier_country)}</Ctry>
 {creditor_addr_xml}</PstlAdr>
 </Cdtr>
 <CdtrAcct>
@@ -253,7 +282,7 @@ def export_payment_instruction_xml(
 </Id>
 </CdtrAcct>
 <RmtInf>
-<Ustrd>{escape(rmt_info)}</Ustrd>
+<Ustrd>{escape(_t(rmt_info, "Ustrd"))}</Ustrd>
 </RmtInf>
 </CdtTrfTxInf>
 """
