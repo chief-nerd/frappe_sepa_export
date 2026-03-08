@@ -269,7 +269,11 @@ def get_bulk_invoice_details(invoice_names):
 @frappe.whitelist()
 def validate_supplier_banking_details(supplier_name):
     """
-    Validate if supplier has necessary banking details for SEPA export
+    Validate if supplier has necessary banking details for SEPA export.
+
+    Uses the same resolution logic as the export itself:
+        1. Supplier.default_bank_account
+        2. Bank Account linked via party_type / party
 
     Args:
         supplier_name: Name of the supplier
@@ -277,32 +281,32 @@ def validate_supplier_banking_details(supplier_name):
     Returns:
         dict: Status and message
     """
-    supplier = frappe.get_doc("Supplier", supplier_name)
+    from frappe_sepa_export.sepa_payment.export import _resolve_supplier_bank_account
 
-    # Check if supplier has a default bank account
-    if not supplier.default_bank_account:
+    bank_account_name = _resolve_supplier_bank_account(supplier_name)
+
+    if not bank_account_name:
         return {
             "valid": False,
             "message": _(
-                "Supplier {0} doesn't have a default bank account configured"
+                "Supplier {0} has no bank account. "
+                "Set the default_bank_account field on the Supplier, "
+                "or create a Bank Account record linked to the Supplier."
             ).format(supplier_name),
         }
 
-    # Check if bank account has necessary details
     try:
-        bank_account = frappe.get_doc("Bank Account", supplier.default_bank_account)
+        bank_account = frappe.get_doc("Bank Account", bank_account_name)
 
         missing_fields = []
         if not bank_account.iban:
             missing_fields.append("IBAN")
 
-        # BIC/SWIFT is optional, not checking for bank_account_no
-
         if missing_fields:
             return {
                 "valid": False,
                 "message": _("Bank account {0} is missing required fields: {1}").format(
-                    supplier.default_bank_account, ", ".join(missing_fields)
+                    bank_account_name, ", ".join(missing_fields)
                 ),
             }
 
@@ -310,7 +314,7 @@ def validate_supplier_banking_details(supplier_name):
         return {
             "valid": False,
             "message": _("Bank account {0} for supplier {1} not found").format(
-                supplier.default_bank_account, supplier_name
+                bank_account_name, supplier_name
             ),
         }
 

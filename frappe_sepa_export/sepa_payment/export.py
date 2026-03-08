@@ -49,7 +49,7 @@ def _resolve_supplier_bank_account(supplier_name):
     # Fallback: find a Bank Account linked to this Supplier
     linked = frappe.db.get_value(
         "Bank Account",
-        {"party_type": "Supplier", "party": supplier_name, "is_company_account": 0},
+        {"party_type": "Supplier", "party": supplier_name, "disabled": 0},
         "name",
     )
     return linked or None
