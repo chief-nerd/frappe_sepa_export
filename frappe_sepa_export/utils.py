@@ -387,8 +387,12 @@ def get_bulk_invoice_details(invoice_names):
 
 @frappe.whitelist()
 def get_open_invoices(company):
-    """Return submitted, open Purchase Invoices for the given company."""
-    return frappe.get_all(
+    """Return submitted, open Purchase Invoices for the given company.
+
+    Each row is enriched with ``supplier_iban`` resolved via
+    :func:`_resolve_supplier_bank_account` / :func:`_get_bank_details`.
+    """
+    invoices = frappe.get_all(
         "Purchase Invoice",
         filters={
             "company": company,
@@ -408,3 +412,15 @@ def get_open_invoices(company):
         ],
         order_by="posting_date asc",
     )
+
+    # Enrich with supplier IBAN (cached per supplier to avoid repeated queries)
+    iban_cache = {}
+    for inv in invoices:
+        supplier = inv["supplier"]
+        if supplier not in iban_cache:
+            ba_name = _resolve_supplier_bank_account(supplier)
+            details = _get_bank_details(ba_name) if ba_name else {"iban": "", "bic": ""}
+            iban_cache[supplier] = details["iban"]
+        inv["supplier_iban"] = iban_cache[supplier]
+
+    return invoices
