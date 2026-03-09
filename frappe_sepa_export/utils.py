@@ -392,6 +392,16 @@ def get_bulk_invoice_details(invoice_names):
             ).format(", ".join(companies))
         )
 
+    # Enrich with supplier IBAN (cached per supplier)
+    iban_cache = {}
+    for inv in invoices:
+        supplier = inv["supplier"]
+        if supplier not in iban_cache:
+            ba_name = _resolve_supplier_bank_account(supplier)
+            details = _get_bank_details(ba_name) if ba_name else {"iban": "", "bic": ""}
+            iban_cache[supplier] = details["iban"]
+        inv["supplier_iban"] = iban_cache[supplier]
+
     return invoices
 
 
