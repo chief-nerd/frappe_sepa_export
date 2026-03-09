@@ -26,7 +26,7 @@ A Frappe/ERPNext application that generates ISO 20022 SEPA XML Payment Instructi
 ## Installation
 
 ```bash
-bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_export && && bench install-app frappe_sepa_export
+bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_export && bench install-app frappe_sepa_export
 ```
 
 ## Update
