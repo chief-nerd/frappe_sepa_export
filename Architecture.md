@@ -1,53 +1,117 @@
 # Frappe App Architecture
 
-This document outlines the modern Frappe app structure used in this project, based on best practices from successful Frappe v15+ applications.
+This document describes the architecture of **frappe_sepa_export**, a Frappe v15+ application that generates SEPA XML Payment Instruction files (pain.001.001.03, STUZZA Austrian variant) from ERPNext Purchase Invoices.
 
-## Modern Frappe App Structure (v15+)
+It also captures general Frappe app patterns and lessons learned during development.
 
-### Key Architectural Decisions
+---
 
-1. **Use `pyproject.toml` instead of `setup.py`**
-   - Modern Python packaging standard (PEP 517/518)
-   - Uses `flit_core` as the build backend
-   - Simpler configuration and better tooling support
+## Application Architecture
 
-2. **Module-based `hooks.py` location**
-   - Place `hooks.py` inside the app module directory (e.g., `frappe_sepa_export/hooks.py`)
-   - With `pyproject.toml`, Frappe reads hooks from the module, not the root
-   - Root `hooks.py` can be kept for backward compatibility but is not required
+### Overview
 
-3. **Version management**
-   - Define `__version__` in both `__init__.py` and `__version__.py`
-   - Use `dynamic = ["version"]` in `pyproject.toml` to read from `__init__.py`
-   - No complex version parsing needed
+The app follows a strict **one-way dependency** between its two Python modules:
 
-4. **Build system**
-   - Use empty `build.json` (`{}`) for apps without asset bundling needs
-   - JavaScript files loaded directly via `hooks.py` configuration
-   - No esbuild/webpack required for simple JS files
+```
+export.py  ──imports──▶  utils.py
+```
+
+- **`utils.py`** — single source of truth for all data-resolution helpers and whitelisted API endpoints. All address lookups, bank account resolution, IBAN/BIC handling, and validation logic live here.
+- **`export.py`** — responsible solely for XML generation. Imports helpers from `utils.py`; has no whitelisted endpoints of its own except the main `export_payment_instruction_xml()`.
+
+There are three client-side entry points, each calling the same backend API:
+
+| Entry Point    | File                                               | Trigger                                                             |
+| -------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
+| Single invoice | `public/js/purchase_invoice.js`                    | **Create → Export SEPA XML** on a Purchase Invoice form             |
+| List-view bulk | `public/js/purchase_invoice_list.js`               | **Actions → Export SEPA XML** after selecting invoices in list view |
+| Dedicated page | `sepa_file_export/page/sepa_export/sepa_export.js` | Navigate to `/app/sepa-export`                                      |
+
+All three use `frappe.call` to invoke the backend and download the result as a blob (no `open_url_post`).
+
+### Whitelisted API Endpoints
+
+| Endpoint                                                                | Module | Purpose                                                         |
+| ----------------------------------------------------------------------- | ------ | --------------------------------------------------------------- |
+| `frappe_sepa_export.utils.get_supplier_bank_info`                       | utils  | Return `{iban, bic}` for a supplier                             |
+| `frappe_sepa_export.utils.get_debtor_info`                              | utils  | Debtor info from SEPA Settings + Company address                |
+| `frappe_sepa_export.utils.validate_sepa_export`                         | utils  | Pre-flight validation (addresses, bank accounts, IBANs)         |
+| `frappe_sepa_export.utils.get_bulk_invoice_details`                     | utils  | Validated invoice details for review tables                     |
+| `frappe_sepa_export.utils.get_open_invoices`                            | utils  | Open invoices enriched with `supplier_iban` (for the SEPA page) |
+| `frappe_sepa_export.sepa_payment.export.export_payment_instruction_xml` | export | Generate and return SEPA XML `{filename, filecontent}`          |
+
+### Bank Account Resolution
+
+Supplier bank accounts are resolved by querying `tabBank Account` directly:
+
+```
+Bank Account  WHERE  party_type = 'Supplier'
+                AND  party      = <supplier_name>
+                AND  disabled   = 0
+              LIMIT 1
+```
+
+The BIC is resolved from `Bank.swift_number` (the bank linked to the Bank Account record). If no BIC is found, the XML uses `<Othr><Id>NOTPROVIDED</Id></Othr>` per SEPA rules.
+
+> The app does **not** use `Supplier.default_bank_account` — that field is rarely set in practice.
+
+### ISO 20022 Compliance
+
+- **Namespace:** `ISO:pain.001.001.03:APC:STUZZA:payments:003`
+- **Structured postal addresses:** `<StrtNm>`, `<PstCd>`, `<TwnNm>`, `<Ctry>` — in XSD-mandated element order (PostalAddress6 sequence)
+- **Field length limits:** enforced via `_MAX_LEN` dict and `_t()` truncation helper:
+  - `Nm`: 70, `StrtNm`: 70, `PstCd`: 16, `TwnNm`: 35
+  - `EndToEndId`: 35, `InstrId`: 35, `MsgId`: 35, `PmtInfId`: 35, `Ustrd`: 140
+- **IBAN normalisation:** spaces stripped, uppercased via `_strip_iban()`
+- **Amount:** uses `outstanding_amount` (not `grand_total`) to support partial payments
+
+---
 
 ## File Structure
 
 ```
 frappe_sepa_export/
-├── pyproject.toml              # Modern Python package configuration
-├── MANIFEST.in                 # CRITICAL: Specifies which files to include in package
-├── requirements.txt            # Python dependencies
-├── package.json                # Node.js metadata (minimal for Frappe apps)
-├── README.md                   # Documentation
-└── frappe_sepa_export/         # Main app module
-    ├── __init__.py             # Module initialization with __version__
-    ├── __version__.py          # Version definition
-    ├── hooks.py                # Frappe hooks configuration (ONLY here, not in root)
-    ├── public/                 # Static assets (included via MANIFEST.in)
-    │   └── js/                 # JavaScript files
-    │       ├── frappe_sepa_export.js
-    │       └── purchase_invoice.js
-    ├── config/                 # App configuration
-    │   └── frappe_sepa_export.py
-    ├── doctype/                # Custom DocTypes
-    ├── install/                # Installation scripts
-    └── utils.py                # Utility functions
+├── pyproject.toml                          # PEP 517/518 package config (flit_core)
+├── MANIFEST.in                             # CRITICAL: includes JS/CSS/JSON in pip package
+├── requirements.txt
+├── package.json
+├── README.md
+├── Architecture.md
+└── frappe_sepa_export/                     # Main app module
+    ├── __init__.py                         # __version__
+    ├── __version__.py
+    ├── hooks.py                            # doctype_js, doctype_list_js, after_install
+    ├── modules.txt                         # "SEPA File Export"
+    ├── patches.txt
+    ├── utils.py                            # Shared helpers + all whitelisted API endpoints
+    ├── public/
+    │   ├── build.json                      # Empty {} — no bundling needed
+    │   └── js/
+    │       ├── purchase_invoice.js          # Single-invoice export (form button)
+    │       └── purchase_invoice_list.js     # Bulk export (list-view Actions menu)
+    ├── config/
+    │   └── frappe_sepa_export.py            # Desk sidebar config
+    ├── install/
+    │   ├── __init__.py
+    │   └── setup.py                        # after_install: creates Module Def
+    ├── sepa_file_export/                   # Frappe module: "SEPA File Export"
+    │   ├── __init__.py
+    │   ├── doctype/
+    │   │   ├── __init__.py
+    │   │   └── sepa_settings/
+    │   │       ├── __init__.py
+    │   │       ├── sepa_settings.json      # DocType definition
+    │   │       └── sepa_settings.py        # (minimal)
+    │   └── page/
+    │       ├── __init__.py
+    │       └── sepa_export/
+    │           ├── __init__.py
+    │           ├── sepa_export.json         # Page definition → /app/sepa-export
+    │           ├── sepa_export.js           # Dedicated SEPA export page
+    │           └── sepa_export.css
+    └── sepa_payment/
+        ├── __init__.py
+        └── export.py                       # XML generation (pain.001.001.03)
 ```
 
 **CRITICAL: Every directory in the module path must contain an `__init__.py` file.** This includes:
@@ -57,23 +121,28 @@ frappe_sepa_export/
 
 Missing any `__init__.py` will cause "Module not found" errors at runtime even though the files exist on disk.
 
-**Note:** No `build.json` file is needed for simple apps. Omit it entirely.
+---
 
-## pyproject.toml Configuration
+## Frappe App Patterns (v15+)
+
+### Key Architectural Decisions
+
+1. **Use `pyproject.toml` instead of `setup.py`** — PEP 517/518 standard, uses `flit_core` as build backend
+2. **Module-based `hooks.py` location** — place `hooks.py` inside the app module directory; with `pyproject.toml`, Frappe reads hooks from the module, not the root
+3. **Version management** — `__version__` in both `__init__.py` and `__version__.py`; `dynamic = ["version"]` in `pyproject.toml`
+4. **No bundling needed** — empty `build.json` (`{}`), JS loaded directly via `hooks.py`
+
+### pyproject.toml Configuration
 
 ```toml
 [project]
 name = "frappe_sepa_export"
-authors = [
-    { name = "Mimirio", email = "dev@mimirio.com"}
-]
+authors = [{ name = "Mimirio", email = "dev@mimirio.com" }]
 description = "Generate SEPA XML Payment Instruction files for Purchase Invoices"
 requires-python = ">=3.10"
 readme = "README.md"
-dynamic = ["version"]           # Read version from __init__.py
-dependencies = [
-    "beautifulsoup4>=4.9.0"
-]
+dynamic = ["version"]
+dependencies = []
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]
@@ -84,20 +153,22 @@ Homepage = "https://github.com/chief-nerd/frappe_sepa_export"
 Repository = "https://github.com/chief-nerd/frappe_sepa_export.git"
 ```
 
-## JavaScript Asset Loading
+### JavaScript Asset Loading
 
 For Frappe v15+, there are two ways to load JavaScript:
 
-### 1. Direct Loading (Recommended for Simple Apps)
+#### 1. Direct Loading (Recommended for Simple Apps)
 Configure in `hooks.py`:
 
 ```python
-# Global JS - loads on all pages
-app_include_js = "/assets/frappe_sepa_export/js/frappe_sepa_export.js"
-
-# DocType-specific JS - loads only for specific DocTypes
+# DocType-specific JS — loads only on the Purchase Invoice form
 doctype_js = {
     "Purchase Invoice": "public/js/purchase_invoice.js"
+}
+
+# List-view JS — loads on the Purchase Invoice list
+doctype_list_js = {
+    "Purchase Invoice": "public/js/purchase_invoice_list.js"
 }
 ```
 
@@ -130,44 +201,18 @@ This requires esbuild to process the files during `bench build`.
 
 **Note:** Most apps don't need bundling. Start without `build.json` and only add it if you have complex build requirements.
 
-## Version Management
+### Version Management
 
-### __init__.py
-```python
-__version__ = "0.0.1"
-```
+Both `__init__.py` and `__version__.py` should contain the same version string. The `pyproject.toml` with `dynamic = ["version"]` reads from `__init__.py` automatically.
 
-### __version__.py
-```python
-__version__ = "0.0.1"
-```
-
-Both files should contain the same version. The `pyproject.toml` with `dynamic = ["version"]` will automatically read from `__init__.py`.
-
-## Installation Process
+### Installation Process
 
 1. **Get app:** `bench get-app frappe_sepa_export https://github.com/chief-nerd/frappe_sepa_export`
-2. **Install app:** `bench install-app frappe_sepa_export`
+2. **Install app:** `bench --site <site> install-app frappe_sepa_export`
 3. **Build assets:** `bench build --app frappe_sepa_export` (if needed)
 
-With the modern structure:
-- `pip` uses `pyproject.toml` for installation
-- `flit_core` builds the package
-- Version is read dynamically from `__init__.py`
-- Assets are either bundled (if `build.json` has content) or served directly (if empty)
-
-## Migration from Old Structure
-
-If migrating from `setup.py` based structure:
-
-1. Create `pyproject.toml` with proper configuration
-2. Move or copy `hooks.py` to module directory
-3. Ensure `__version__` exists in both `__init__.py` and `__version__.py`
-4. Remove `setup.py`
-5. Simplify `build.json` (use `{}` if no bundling needed)
-6. Update `.gitignore` to exclude build artifacts
-
-## Best Practices
+### Best Practices
+### Best Practices
 
 1. **MANIFEST.in is CRITICAL** - Always include a complete `MANIFEST.in` file listing all asset types (JS, CSS, HTML, JSON, etc.). This is the #1 cause of "paths[0] undefined" errors.
 2. **No build.json needed** - For simple apps, omit `build.json` entirely (don't even create an empty one). JavaScript loads via `hooks.py`.
@@ -179,14 +224,14 @@ If migrating from `setup.py` based structure:
 8. **Type hints** - Use Python type annotations for better IDE support
 9. **Documentation** - Keep README.md updated with installation and usage instructions
 
-## References
+### References
 
 Successful Frappe apps following this structure:
 - [red_background](https://github.com/alyf-de/red_background) - Minimal app example
 - [erpnext_pdf-on-submit](https://github.com/alyf-de/erpnext_pdf-on-submit) - Feature-rich app
 - [frappe/hrms](https://github.com/frappe/hrms) - Large-scale official app
 
-## Critical: MANIFEST.in Configuration
+### MANIFEST.in Configuration
 
 **This is the most common cause of installation failures with pyproject.toml apps!**
 
@@ -224,6 +269,8 @@ recursive-exclude frappe_sepa_export *.pyc
 - Include all file types used in your app (JS, CSS, HTML, JSON, etc.)
 - The `*.js` inclusion is critical for JavaScript files in `public/js/`
 - Without this, pip installs the Python code but not the static assets
+
+---
 
 ## Troubleshooting
 
