@@ -11,19 +11,42 @@ frappe.ui.form.on('Purchase Invoice', {
 });
 
 function show_sepa_export_dialog(frm) {
-	// Fetch debtor info from SEPA Settings / Company's default bank account
+	// Fetch debtor info and supplier bank info in parallel
+	let debtor_info = null;
+	let supplier_bank = null;
+	let calls_done = 0;
+
+	function on_ready() {
+		calls_done++;
+		if (calls_done === 2 && debtor_info) {
+			create_dialog(frm, debtor_info, supplier_bank || {});
+		}
+	}
+
 	frappe.call({
 		method: 'frappe_sepa_export.utils.get_debtor_info',
 		args: { company: frm.doc.company },
 		callback(r) {
-			if (r.message) {
-				create_dialog(frm, r.message);
-			}
+			if (r.message) debtor_info = r.message;
+			on_ready();
+		}
+	});
+
+	frappe.call({
+		method: 'frappe_sepa_export.utils.get_supplier_bank_info',
+		args: { supplier: frm.doc.supplier },
+		callback(r) {
+			if (r.message) supplier_bank = r.message;
+			on_ready();
 		}
 	});
 }
 
-function create_dialog(frm, debtor_info) {
+function create_dialog(frm, debtor_info, supplier_bank) {
+	const supplier_iban = supplier_bank.iban
+		? supplier_bank.iban.replace(/(.{4})/g, '$1 ').trim()
+		: '';
+
 	const d = new frappe.ui.Dialog({
 		title: __('Export SEPA Payment Instruction'),
 		fields: [
@@ -54,6 +77,30 @@ function create_dialog(frm, debtor_info) {
 				fieldtype: 'Data',
 				default: frm.doc.currency || 'EUR',
 				read_only: 1
+			},
+			{
+				fieldtype: 'Section Break',
+				label: __('Supplier Bank Account')
+			},
+			{
+				label: __('Supplier'),
+				fieldname: 'supplier_name',
+				fieldtype: 'Data',
+				default: frm.doc.supplier_name || frm.doc.supplier,
+				read_only: 1
+			},
+			{
+				fieldtype: 'Column Break'
+			},
+			{
+				label: __('Supplier IBAN'),
+				fieldname: 'supplier_iban',
+				fieldtype: 'Data',
+				default: supplier_iban || __('Not configured'),
+				read_only: 1,
+				description: supplier_iban
+					? ''
+					: __('No Bank Account found for this supplier.')
 			},
 			{
 				fieldtype: 'Section Break'

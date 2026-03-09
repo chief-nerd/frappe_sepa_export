@@ -166,6 +166,20 @@ def _get_bank_details(bank_account_name):
 
 
 @frappe.whitelist()
+def get_supplier_bank_info(supplier):
+    """Return the resolved IBAN and BIC for a supplier.
+
+    Args:
+        supplier: Supplier name
+
+    Returns:
+        dict: ``{iban, bic}``
+    """
+    ba_name = _resolve_supplier_bank_account(supplier)
+    return _get_bank_details(ba_name)
+
+
+@frappe.whitelist()
 def get_debtor_info(company):
     """Fetch debtor information for SEPA export.
 

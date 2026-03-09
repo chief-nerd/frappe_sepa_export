@@ -156,8 +156,13 @@ class SEPAExportTool {
 				</td>
 				<td style="vertical-align:middle; font-family:monospace; font-size:0.9em; white-space:nowrap;">
 					${inv.supplier_iban
-					? frappe.utils.escape_html(inv.supplier_iban)
-					: '<span class="text-danger">' + __('Missing') + '</span>'}
+					? frappe.utils.escape_html(inv.supplier_iban.replace(/(.{4})/g, '$1 ').trim())
+					: '<span class="text-danger">' + __('Missing') + '</span>'
+					  + ' <a href="/app/bank-account/new?party_type=Supplier'
+					  + '&party=' + encodeURIComponent(inv.supplier)
+					  + '&account_name=' + encodeURIComponent(inv.supplier_name || inv.supplier)
+					  + '" target="_blank" class="btn btn-xs btn-default" style="margin-left:6px;">'
+					  + '<i class="fa fa-plus" style="margin-right:3px;"></i>' + __('Add') + '</a>'}
 				</td>
 				<td style="vertical-align:middle;">
 					${frappe.utils.escape_html(inv.bill_no || '–')}
